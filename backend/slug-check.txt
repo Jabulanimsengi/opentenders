@@ -1,0 +1,31 @@
+Sample tenders:
+
+---
+ID: 00004c5c-498f-4934-bc5a-074a5e701b10
+Title: MDM 2025/26-12
+OCID: ocds-9t57fa-139717
+Slug: mdm-202526-12-139717
+
+---
+ID: 0000d7e8-5d60-4327-bb44-a653375f5ced
+Title: SCMU8-25/26-0112
+OCID: ocds-9t57fa-141493
+Slug: scmu8-2526-0112-141493
+
+---
+ID: 00040c81-b705-4591-819e-fa91799b3c5f
+Title: Q05-02-2025-26
+OCID: ocds-9t57fa-132403
+Slug: q05-02-2025-26-132403
+
+---
+ID: 000557db-98a7-4df8-8f9d-b44d4b06957c
+Title: T05.25.26
+OCID: ocds-9t57fa-131222
+Slug: t052526-131222
+
+---
+ID: 000c73a8-8a09-4ee3-a993-7c78707fdd68
+Title: NRF/SARAO SNAF/58/2025-26
+OCID: ocds-9t57fa-139731
+Slug: nrfsarao-snaf582025-26-139731

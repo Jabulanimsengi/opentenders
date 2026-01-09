@@ -1,0 +1,145 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Tender {
+  id              String    @id @default(uuid())
+  ocid            String    @unique
+  slug            String?   @unique
+  publishedDate   DateTime
+  title           String
+  description     String?
+  status          String?
+  category        String?
+  region          String?
+  
+  closingDate     DateTime?
+  briefingDate    DateTime?
+  
+  buyerName       String?
+  
+  // JSON string of the full record for archival/extra details
+  rawData         String? 
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  awards          Award[]
+
+  @@index([status])
+  @@index([closingDate])
+  @@index([buyerName])
+  @@index([category])
+  @@index([region])
+  @@index([publishedDate])
+  @@index([slug])
+}
+
+model Award {
+  id            String    @id @default(uuid())
+  tenderId      String
+  tender        Tender    @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  
+  supplierName  String
+  amount        Float?
+  currency      String    @default("ZAR")
+  date          DateTime?
+  
+  createdAt     DateTime  @default(now())
+
+  @@index([tenderId])
+  @@index([supplierName])
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String // Hashed
+  name          String?
+  role          String    @default("user") // user, admin
+  createdAt     DateTime  @default(now())
+  
+  savedSearches SavedSearch[]
+  subscription  Subscription?
+}
+
+model Subscription {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  plan        String    @default("free") // free, solo, team, enterprise
+  status      String    @default("active") // active, cancelled, expired, trial
+  
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  
+  // For team plans
+  teamSize    Int       @default(1)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([plan])
+  @@index([status])
+}
+
+model SavedSearch {
+  id            String    @id @default(uuid())
+  name          String
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Stored as JSON string: { "region": ["Gauteng"], "q": "IT" }
+  criteria      String 
+  
+  // Alert settings
+  alertsEnabled   Boolean   @default(true)
+  alertFrequency  String    @default("daily") // daily, weekly, instant
+  
+  lastAlertedAt DateTime?
+  createdAt     DateTime  @default(now())
+  
+  @@index([userId])
+}
+
+model Bookmark {
+  id          String    @id @default(uuid())
+  userId      String
+  tenderId    String
+  
+  // Reminder settings
+  remindDays  Int?      // Days before closing to send reminder (null = no reminder)
+  reminded    Boolean   @default(false) // Track if reminder was sent
+  
+  createdAt   DateTime  @default(now())
+  
+  notes       TenderNote[]
+  
+  @@unique([userId, tenderId])
+  @@index([userId])
+  @@index([tenderId])
+}
+
+model TenderNote {
+  id          String    @id @default(uuid())
+  userId      String
+  tenderId    String
+  bookmarkId  String?
+  bookmark    Bookmark? @relation(fields: [bookmarkId], references: [id], onDelete: Cascade)
+  
+  content     String
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([tenderId])
+  @@index([bookmarkId])
+}

@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Tender {
+  id              String    @id @default(uuid())
+  ocid            String    @unique
+  slug            String?   @unique
+  publishedDate   DateTime
+  title           String
+  description     String?
+  status          String?
+  category        String?
+  region          String?
+  province        String?
+  
+  closingDate     DateTime?
+  briefingDate    DateTime?
+  briefingVenue   String?
+  briefingCompulsory Boolean @default(false)
+  
+  buyerName       String?
+  
+  // Contact person
+  contactName     String?
+  contactEmail    String?
+  contactPhone    String?
+  
+  // Value
+  estimatedValue  Float?
+  currency        String?   @default("ZAR")
+  
+  // Requirements
+  eligibilityCriteria String?
+  specialConditions   String?
+  submissionMethod    String?
+  
+  // JSON string of the full record for archival/extra details
+  rawData         String? 
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  awards          Award[]
+
+  @@index([status])
+  @@index([closingDate])
+  @@index([buyerName])
+  @@index([category])
+  @@index([region])
+  @@index([province])
+  @@index([publishedDate])
+  @@index([slug])
+}
+
+model Award {
+  id            String    @id @default(uuid())
+  tenderId      String
+  tender        Tender    @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  
+  supplierName  String
+  amount        Float?
+  currency      String    @default("ZAR")
+  date          DateTime?
+  
+  createdAt     DateTime  @default(now())
+
+  @@index([tenderId])
+  @@index([supplierName])
+  @@unique([tenderId, supplierName])
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String // Hashed
+  name          String?
+  role          String    @default("user") // user, admin
+  createdAt     DateTime  @default(now())
+  
+  savedSearches SavedSearch[]
+  subscription  Subscription?
+  bookmarks     Bookmark[]
+}
+
+model Subscription {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  plan        String    @default("free") // free, solo, team, enterprise
+  status      String    @default("active") // active, cancelled, expired, trial
+  
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  
+  // For team plans
+  teamSize    Int       @default(1)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([plan])
+  @@index([status])
+}
+
+model SavedSearch {
+  id            String    @id @default(uuid())
+  name          String
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Stored as JSON string: { "region": ["Gauteng"], "q": "IT" }
+  criteria      String 
+  
+  lastAlertedAt DateTime?
+  createdAt     DateTime  @default(now())
+  
+  @@index([userId])
+}
+
+model Bookmark {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenderId  String
+  notes     String?
+  createdAt DateTime @default(now())
+  
+  @@unique([userId, tenderId])
+  @@index([userId])
+  @@index([tenderId])
+}
+

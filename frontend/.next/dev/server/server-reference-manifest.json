@@ -1,0 +1,78 @@
+{
+  "node": {
+    "6074f40305a68e7fea1a94cf5ccb4e45176e560227": {
+      "workers": {
+        "app/(dashboard)/dashboard/page": {
+          "moduleId": "[project]/frontend/.next-internal/server/app/(dashboard)/dashboard/page/actions.js { ACTIONS_MODULE0 => \"[project]/frontend/lib/actions.ts [app-rsc] (ecmascript)\" } [app-rsc] (server actions loader, ecmascript)",
+          "async": false,
+          "exportedName": "authenticate",
+          "filename": "frontend/lib/actions.ts"
+        },
+        "app/(dashboard)/tenders/[slug]/page": {
+          "moduleId": "[project]/frontend/.next-internal/server/app/(dashboard)/tenders/[slug]/page/actions.js { ACTIONS_MODULE0 => \"[project]/frontend/lib/actions.ts [app-rsc] (ecmascript)\" } [app-rsc] (server actions loader, ecmascript)",
+          "async": false,
+          "exportedName": "authenticate",
+          "filename": "frontend/lib/actions.ts"
+        },
+        "app/(landing)/page": {
+          "moduleId": "[project]/frontend/.next-internal/server/app/(landing)/page/actions.js { ACTIONS_MODULE0 => \"[project]/frontend/lib/actions.ts [app-rsc] (ecmascript)\" } [app-rsc] (server actions loader, ecmascript)",
+          "async": false,
+          "exportedName": "authenticate",
+          "filename": "frontend/lib/actions.ts"
+        },
+        "app/(landing)/tenders/page": {
+          "moduleId": "[project]/frontend/.next-internal/server/app/(landing)/tenders/page/actions.js { ACTIONS_MODULE0 => \"[project]/frontend/lib/actions.ts [app-rsc] (ecmascript)\" } [app-rsc] (server actions loader, ecmascript)",
+          "async": false,
+          "exportedName": "authenticate",
+          "filename": "frontend/lib/actions.ts"
+        }
+      },
+      "layer": {
+        "app/(dashboard)/dashboard/page": "action-browser",
+        "app/(dashboard)/tenders/[slug]/page": "action-browser",
+        "app/(landing)/page": "action-browser",
+        "app/(landing)/tenders/page": "action-browser"
+      },
+      "filename": "frontend/lib/actions.ts",
+      "exportedName": "authenticate"
+    },
+    "60e00d1bd95fd5abc9985202f260aee42d9010e696": {
+      "workers": {
+        "app/(dashboard)/dashboard/page": {
+          "moduleId": "[project]/frontend/.next-internal/server/app/(dashboard)/dashboard/page/actions.js { ACTIONS_MODULE0 => \"[project]/frontend/lib/actions.ts [app-rsc] (ecmascript)\" } [app-rsc] (server actions loader, ecmascript)",
+          "async": false,
+          "exportedName": "register",
+          "filename": "frontend/lib/actions.ts"
+        },
+        "app/(dashboard)/tenders/[slug]/page": {
+          "moduleId": "[project]/frontend/.next-internal/server/app/(dashboard)/tenders/[slug]/page/actions.js { ACTIONS_MODULE0 => \"[project]/frontend/lib/actions.ts [app-rsc] (ecmascript)\" } [app-rsc] (server actions loader, ecmascript)",
+          "async": false,
+          "exportedName": "register",
+          "filename": "frontend/lib/actions.ts"
+        },
+        "app/(landing)/page": {
+          "moduleId": "[project]/frontend/.next-internal/server/app/(landing)/page/actions.js { ACTIONS_MODULE0 => \"[project]/frontend/lib/actions.ts [app-rsc] (ecmascript)\" } [app-rsc] (server actions loader, ecmascript)",
+          "async": false,
+          "exportedName": "register",
+          "filename": "frontend/lib/actions.ts"
+        },
+        "app/(landing)/tenders/page": {
+          "moduleId": "[project]/frontend/.next-internal/server/app/(landing)/tenders/page/actions.js { ACTIONS_MODULE0 => \"[project]/frontend/lib/actions.ts [app-rsc] (ecmascript)\" } [app-rsc] (server actions loader, ecmascript)",
+          "async": false,
+          "exportedName": "register",
+          "filename": "frontend/lib/actions.ts"
+        }
+      },
+      "layer": {
+        "app/(dashboard)/dashboard/page": "action-browser",
+        "app/(dashboard)/tenders/[slug]/page": "action-browser",
+        "app/(landing)/page": "action-browser",
+        "app/(landing)/tenders/page": "action-browser"
+      },
+      "filename": "frontend/lib/actions.ts",
+      "exportedName": "register"
+    }
+  },
+  "edge": {},
+  "encryptionKey": "WrdxZ6+emHSkEPzBK+1d5RbXb2UlVP3q72u/eLKa0Wg="
+}
