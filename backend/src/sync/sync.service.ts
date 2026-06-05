@@ -158,7 +158,9 @@ export class SyncService {
     delayMs = 200,
     fullRange = false,
   }: TenderDateRangeSyncOptions = {}): Promise<number> {
-    const defaultPageLimit = fullRange ? MAX_MANUAL_PAGE_LIMIT : SYNC_PAGE_LIMIT;
+    const defaultPageLimit = fullRange
+      ? MAX_MANUAL_PAGE_LIMIT
+      : SYNC_PAGE_LIMIT;
     const defaultPageSize = fullRange ? MAX_MANUAL_PAGE_SIZE : SYNC_PAGE_SIZE;
     const resolvedPageLimit = Math.max(
       1,
@@ -333,12 +335,69 @@ export class SyncService {
       update: tender,
       create: tender,
     });
+    await this.upsertAwards(result.id, item.awards);
     await this.typesense?.indexTender(result);
     if (!existing && notifyNew && isActiveTenderLike(result)) {
       await this.alertsService.notifyNewTender(result);
     }
 
     return true;
+  }
+
+  private async upsertAwards(tenderId: string, awards?: OCDSRelease['awards']) {
+    if (!awards?.length) return 0;
+
+    let saved = 0;
+    const seenSuppliers = new Set<string>();
+
+    for (const award of awards) {
+      const date = this.parseOptionalDate(award.date);
+      const amount =
+        typeof award.value?.amount === 'number' &&
+        Number.isFinite(award.value.amount)
+          ? award.value.amount
+          : null;
+      const currency = award.value?.currency || 'ZAR';
+
+      for (const supplier of award.suppliers || []) {
+        const supplierName = supplier.name?.replace(/\s+/g, ' ').trim();
+        if (!supplierName) continue;
+
+        const supplierKey = supplierName.toLowerCase();
+        if (seenSuppliers.has(supplierKey)) continue;
+        seenSuppliers.add(supplierKey);
+
+        await this.prisma.award.upsert({
+          where: {
+            tenderId_supplierName: {
+              tenderId,
+              supplierName,
+            },
+          },
+          update: {
+            amount,
+            currency,
+            date,
+          },
+          create: {
+            tenderId,
+            supplierName,
+            amount,
+            currency,
+            date,
+          },
+        });
+        saved++;
+      }
+    }
+
+    return saved;
+  }
+
+  private parseOptionalDate(value?: string) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
   }
 
   async processAlerts() {

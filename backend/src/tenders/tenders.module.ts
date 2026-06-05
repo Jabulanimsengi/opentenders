@@ -3,8 +3,8 @@ import { TendersController } from './tenders.controller';
 import { TendersService } from './tenders.service';
 
 @Module({
-    controllers: [TendersController],
-    providers: [TendersService],
-    exports: [TendersService],
+  controllers: [TendersController],
+  providers: [TendersService],
+  exports: [TendersService],
 })
-export class TendersModule { }
+export class TendersModule {}

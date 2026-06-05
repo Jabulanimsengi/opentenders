@@ -5,9 +5,9 @@ import { AdminGuard } from './admin.guard';
 import { PrismaModule } from '../prisma';
 
 @Module({
-    imports: [PrismaModule],
-    controllers: [AdminController],
-    providers: [AdminService, AdminGuard],
-    exports: [AdminService],
+  imports: [PrismaModule],
+  controllers: [AdminController],
+  providers: [AdminService, AdminGuard],
+  exports: [AdminService],
 })
-export class AdminModule { }
+export class AdminModule {}

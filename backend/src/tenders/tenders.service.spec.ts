@@ -33,32 +33,23 @@ describe('TendersService', () => {
 
     expect(smartSearchTerms).toHaveLength(3);
     expect(smartSearchTerms[0].OR).toContainEqual({
-      title: { contains: 'cleaning' },
+      title: { contains: 'cleaning', mode: 'insensitive' },
+    });
+    expect(smartSearchTerms[0].OR).toContainEqual({
+      category: { equals: 'Cleaning & Hygiene' },
     });
     expect(smartSearchTerms[1].OR).toContainEqual({
-      description: { contains: 'services' },
+      description: { contains: 'services', mode: 'insensitive' },
     });
     expect(smartSearchTerms[2].OR).toContainEqual({
-      region: { contains: 'gauteng' },
+      region: { contains: 'gauteng', mode: 'insensitive' },
     });
     expect(JSON.stringify(where)).not.toContain('cleaning services in gauteng');
     expect(where.AND[1]).toEqual({
-      OR: [
-        {
-          status: 'active',
-          publishedDate: {
-            gte: expect.any(Date),
-            lte: expect.any(Date),
-          },
-          OR: [
-            { closingDate: { gte: expect.any(Date) } },
-            {
-              closingDate: null,
-              publishedDate: { gte: expect.any(Date) },
-            },
-          ],
-        },
-      ],
+      publishedDate: {
+        gte: expect.any(Date),
+        lte: expect.any(Date),
+      },
     });
   });
 
@@ -104,13 +95,14 @@ describe('TendersService', () => {
 
     const where = prisma.tender.findMany.mock.calls[0][0].where;
     const terms = where.AND[0].AND.map(
-      (condition: any) => condition.OR[0].title.contains,
+      (condition: any) =>
+        condition.OR.find((item: any) => item.title).title.contains,
     );
 
     expect(terms).toEqual(['road', 'maintenance', 'city']);
   });
 
-  it('defaults to active non-expired tenders when no status is selected', async () => {
+  it('defaults to valid newest tenders when no status is selected', async () => {
     await service.findAll({
       page: 1,
       limit: 20,
@@ -118,20 +110,12 @@ describe('TendersService', () => {
 
     const where = prisma.tender.findMany.mock.calls[0][0].where;
 
-    expect(where.OR).toEqual([
+    expect(where.AND).toEqual([
       {
-        status: 'active',
         publishedDate: {
           gte: expect.any(Date),
           lte: expect.any(Date),
         },
-        OR: [
-          { closingDate: { gte: expect.any(Date) } },
-          {
-            closingDate: null,
-            publishedDate: { gte: expect.any(Date) },
-          },
-        ],
       },
     ]);
   });

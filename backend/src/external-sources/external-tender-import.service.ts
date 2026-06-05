@@ -14,6 +14,11 @@ import {
   isActiveTenderLike,
   normalizeTenderBriefingDate,
 } from '../tenders/tender-date-rules';
+import {
+  inferTenderCategory,
+  isGenericTenderCategory,
+  normaliseTenderCategory,
+} from '../tenders/tender-categories';
 
 const UNKNOWN_ADVERTISED_DATE = new Date(0);
 
@@ -118,6 +123,25 @@ export class ExternalTenderImportService {
         documentUrls.join('|'),
       ].join('|'),
     );
+    const scrapedCategory = nullableCleanText(result.category);
+    const inferredCategory = inferTenderCategory(
+      [
+        title,
+        result.description,
+        result.rawText,
+        result.tenderNumber,
+        result.referenceNumber,
+        scrapedCategory,
+      ]
+        .filter(Boolean)
+        .join(' | '),
+    );
+    const category =
+      inferredCategory ||
+      normaliseTenderCategory(scrapedCategory) ||
+      (scrapedCategory && !isGenericTenderCategory(scrapedCategory)
+        ? scrapedCategory
+        : 'General');
 
     return {
       ocid: `external-${source.id}-${sourceHash.slice(0, 16)}`,
@@ -127,7 +151,7 @@ export class ExternalTenderImportService {
       tenderNumber: nullableCleanText(result.tenderNumber),
       referenceNumber: nullableCleanText(result.referenceNumber),
       status: nullableCleanText(result.status) || 'active',
-      category: nullableCleanText(result.category) || 'General',
+      category,
       region:
         nullableCleanText(
           result.municipality || result.province || source.province,

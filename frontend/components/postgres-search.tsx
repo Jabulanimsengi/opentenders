@@ -7,6 +7,7 @@ import {
   useTransition,
   Suspense,
   useMemo,
+  useRef,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,6 +27,7 @@ import {
   Bell,
   Megaphone,
   X,
+  Trophy,
 } from "lucide-react";
 import Link from "next/link";
 import { format, isPast, differenceInDays } from "date-fns";
@@ -59,10 +61,20 @@ function TenderCard({
   const publishedDate = tender.publishedDate
     ? new Date(tender.publishedDate)
     : null;
-  const isClosed = closingDate ? isPast(closingDate) : false;
+  const tenderStatus = (tender.status || "active").toLowerCase();
+  const isCancelled = tenderStatus === "cancelled";
+  const isClosed = !isCancelled && closingDate ? isPast(closingDate) : false;
   const daysLeft =
-    closingDate && !isClosed ? differenceInDays(closingDate, new Date()) : null;
+    closingDate && !isClosed && !isCancelled
+      ? differenceInDays(closingDate, new Date())
+      : null;
   const isClosingSoon = daysLeft !== null && daysLeft <= 7;
+  const isNewTender = isNewlyAdvertisedTender(publishedDate);
+  const statusLabel = isCancelled
+    ? "Cancelled"
+    : isClosed
+      ? "Closed"
+      : "Active";
   const advertisedDateText = formatAdvertisedDate(publishedDate);
   const advertisedSource =
     tender.sourceName ||
@@ -93,7 +105,7 @@ function TenderCard({
         <Card
           className={cn(
             "overflow-hidden rounded-lg border-l-[3px] py-0 transition-all hover:shadow-md cursor-pointer sm:border-l-4",
-            isClosed
+            isCancelled || isClosed
               ? "border-l-slate-300 opacity-75"
               : isClosingSoon
                 ? "border-l-amber-500"
@@ -104,22 +116,41 @@ function TenderCard({
           <CardContent className="p-3 sm:p-4">
             <div className="flex flex-col gap-2.5 sm:flex-row sm:justify-between sm:gap-3">
               <div className="flex-1 min-w-0">
-                <div className="mb-1.5 flex items-center gap-1.5">
+                <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                  {isNewTender && (
+                    <Badge className="h-5 rounded bg-sky-500 px-1.5 text-[10px] font-semibold uppercase leading-none text-white hover:bg-sky-500 sm:text-xs">
+                      New
+                    </Badge>
+                  )}
                   <Badge
-                    variant={isClosed ? "secondary" : "default"}
+                    variant={isClosed || isCancelled ? "secondary" : "default"}
                     className={cn(
                       "h-5 rounded px-1.5 text-[10px] leading-none sm:text-xs",
-                      !isClosed && "bg-emerald-500 hover:bg-emerald-600",
+                      !isClosed &&
+                        !isCancelled &&
+                        "bg-emerald-500 hover:bg-emerald-600",
+                      isCancelled && "bg-slate-200 text-slate-600",
                     )}
                   >
-                    {isClosed ? "Closed" : "Active"}
+                    {statusLabel}
                   </Badge>
-                  {isClosingSoon && !isClosed && (
+                  {isClosingSoon && !isClosed && !isCancelled && (
                     <Badge
                       variant="outline"
                       className="h-5 rounded border-amber-300 px-1.5 text-[10px] leading-none text-amber-600 sm:text-xs"
                     >
                       Closes soon
+                    </Badge>
+                  )}
+                  {tender.category && (
+                    <Badge
+                      variant="outline"
+                      className="max-w-full truncate rounded border-slate-200 bg-white px-1.5 text-[10px] leading-none text-slate-600 sm:max-w-[240px] sm:text-xs"
+                    >
+                      <HighlightText
+                        text={tender.category}
+                        terms={highlightTerms}
+                      />
                     </Badge>
                   )}
                 </div>
@@ -184,9 +215,7 @@ function TenderCard({
                     {closingDate && (
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3 shrink-0" />
-                        <span>
-                          Closes {format(closingDate, "dd MMM yyyy")}
-                        </span>
+                        <span>Closes {format(closingDate, "dd MMM yyyy")}</span>
                       </span>
                     )}
                   </div>
@@ -229,17 +258,6 @@ function TenderCard({
                 </div>
                 {isLoggedIn ? (
                   <div className="flex items-center gap-2">
-                    {tender.category && (
-                      <Badge
-                        variant="outline"
-                        className="hidden max-w-[150px] truncate rounded px-1.5 text-[10px] sm:inline-flex sm:text-xs"
-                      >
-                        <HighlightText
-                          text={tender.category}
-                          terms={highlightTerms}
-                        />
-                      </Badge>
-                    )}
                     {/* Quick View Expand Button */}
                     <div className="relative group">
                       <button
@@ -363,6 +381,15 @@ function formatAdvertisedDate(date: Date | null) {
   return `Advertised ${format(date, "dd MMM yyyy")}`;
 }
 
+function isNewlyAdvertisedTender(date: Date | null) {
+  if (!date || Number.isNaN(date.getTime()) || date.getFullYear() <= 1971) {
+    return false;
+  }
+
+  const ageMs = Date.now() - date.getTime();
+  return ageMs >= 0 && ageMs <= 72 * 60 * 60 * 1000;
+}
+
 function labelSourceType(sourceType: string) {
   return sourceType
     .split(/[_\s-]+/)
@@ -467,13 +494,15 @@ function PostgresSearchContent({
   const [selectedAlertCategory, setSelectedAlertCategory] = useState("");
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [isSavingAlert, setIsSavingAlert] = useState(false);
+  const requestSeq = useRef(0);
 
   // Get current values from URL
   const query = searchParams.get("q") || defaultQuery;
   const page = parseInt(searchParams.get("page") || "1", 10);
-  const statusParam = searchParams.get("status") || "active";
+  const statusParam = searchParams.get("status") || "";
   const regionParam = searchParams.get("region") || defaultRegion;
   const categoryParam = searchParams.get("category") || defaultCategory;
+  const awardedOnly = searchParams.get("awarded") === "true";
   const statusFilter = useMemo(
     () => statusParam.split(",").filter(Boolean),
     [statusParam],
@@ -490,6 +519,10 @@ function PostgresSearchContent({
   const categoryAlertOptions = facets?.categories ?? [];
   const showCategoryAlertTools =
     isLoggedIn && isSubscriber && categoryAlertOptions.length > 0;
+
+  useEffect(() => {
+    setInputValue(query);
+  }, [query]);
 
   // Debounced search
   useEffect(() => {
@@ -528,53 +561,77 @@ function PostgresSearchContent({
   }, []);
 
   // Fetch tenders when URL params change
-  const fetchTenders = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      if (query) params.set("q", query);
-      params.set("page", String(page));
-      params.set("limit", "20");
-      if (statusFilter.length) params.set("status", statusFilter.join(","));
-      if (regionFilter.length) params.set("region", regionFilter.join(","));
-      if (categoryFilter.length)
-        params.set("category", categoryFilter.join(","));
+  const fetchTenders = useCallback(
+    async (signal: AbortSignal, requestId: number) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams();
+        if (query) params.set("q", query);
+        params.set("page", String(page));
+        params.set("limit", "20");
+        if (statusFilter.length) params.set("status", statusFilter.join(","));
+        if (regionFilter.length) params.set("region", regionFilter.join(","));
+        if (categoryFilter.length)
+          params.set("category", categoryFilter.join(","));
+        if (awardedOnly) params.set("awarded", "true");
 
-      const res = await fetch(`${API_BASE}/tenders?${params.toString()}`, {
-        cache: "no-store",
-        headers: accessToken
-          ? { Authorization: `Bearer ${accessToken}` }
-          : undefined,
-      });
+        const res = await fetch(`${API_BASE}/tenders?${params.toString()}`, {
+          cache: "no-store",
+          signal,
+          headers: accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined,
+        });
 
-      if (!res.ok) {
-        throw new Error(`API responded with status ${res.status}`);
+        if (!res.ok) {
+          throw new Error(`API responded with status ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (requestId !== requestSeq.current) return;
+        setTenders(data.data || []);
+        setTotalPages(data.meta?.totalPages || 1);
+        setTotal(data.meta?.total || 0);
+        setSearchEngine(data.meta?.searchEngine || "prisma");
+        setProcessingTimeMs(data.meta?.processingTimeMs ?? null);
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") return;
+
+        const message =
+          err instanceof Error ? err.message : "Failed to fetch tenders";
+        console.warn(`Failed to fetch tenders from ${API_BASE}: ${message}`);
+        setError(message);
+        setTenders([]);
+        setSearchEngine(null);
+        setProcessingTimeMs(null);
+      } finally {
+        if (requestId === requestSeq.current) {
+          setIsLoading(false);
+        }
       }
-
-      const data = await res.json();
-      setTenders(data.data || []);
-      setTotalPages(data.meta?.totalPages || 1);
-      setTotal(data.meta?.total || 0);
-      setSearchEngine(data.meta?.searchEngine || "prisma");
-      setProcessingTimeMs(data.meta?.processingTimeMs ?? null);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to fetch tenders";
-      console.warn(`Failed to fetch tenders from ${API_BASE}: ${message}`);
-      setError(message);
-      setTenders([]);
-      setSearchEngine(null);
-      setProcessingTimeMs(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [query, page, statusFilter, regionFilter, categoryFilter, accessToken]);
+    },
+    [
+      query,
+      page,
+      statusFilter,
+      regionFilter,
+      categoryFilter,
+      awardedOnly,
+      accessToken,
+    ],
+  );
 
   useEffect(() => {
+    const controller = new AbortController();
+    const requestId = requestSeq.current + 1;
+    requestSeq.current = requestId;
+
     startTransition(() => {
-      fetchTenders();
+      void fetchTenders(controller.signal, requestId);
     });
+
+    return () => controller.abort();
   }, [fetchTenders]);
 
   const handlePageChange = (newPage: number) => {
@@ -588,6 +645,13 @@ function PostgresSearchContent({
     params.delete("q");
     params.set("page", "1");
     setInputValue("");
+    router.push(`?${params.toString()}`);
+  };
+
+  const handleClearAwarded = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("awarded");
+    params.set("page", "1");
     router.push(`?${params.toString()}`);
   };
 
@@ -685,7 +749,7 @@ function PostgresSearchContent({
           title="Status"
           options={statusOptions}
           paramName="status"
-          defaultSelectedValues={["active"]}
+          defaultSelectedValues={[]}
         />
         {facets?.regions && (
           <TenderFilter
@@ -712,6 +776,22 @@ function PostgresSearchContent({
           />
         )}
       </div>
+
+      {awardedOnly && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:text-sm">
+          <Trophy className="h-4 w-4 shrink-0" />
+          <span className="font-medium">Awarded tenders only</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleClearAwarded}
+            className="ml-auto h-7 rounded px-2 text-amber-800 hover:bg-amber-100"
+          >
+            Clear
+          </Button>
+        </div>
+      )}
 
       {showCategoryAlertTools ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 sm:p-4">
@@ -780,12 +860,12 @@ function PostgresSearchContent({
         {searchEngine === "typesense" && (
           <>
             {" "}
-          <span className="ml-1.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 sm:ml-2 sm:px-2 sm:text-xs">
-            Typesense fast search
-            {typeof processingTimeMs === "number"
-              ? ` in ${processingTimeMs}ms`
-              : ""}
-          </span>
+            <span className="ml-1.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 sm:ml-2 sm:px-2 sm:text-xs">
+              Typesense fast search
+              {typeof processingTimeMs === "number"
+                ? ` in ${processingTimeMs}ms`
+                : ""}
+            </span>
           </>
         )}
       </div>
@@ -804,6 +884,10 @@ function PostgresSearchContent({
       {/* Results */}
       {isLoading ? (
         <div className="space-y-2.5 sm:space-y-4">
+          <div className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-4 text-sm text-slate-600">
+            <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+            <span>{query ? "Searching tenders..." : "Loading tenders..."}</span>
+          </div>
           {[1, 2, 3].map((i) => (
             <div
               key={i}

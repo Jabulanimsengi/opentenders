@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import {
     Dialog,
     DialogContent,
@@ -20,7 +20,6 @@ import {
     Bookmark,
     Plus,
     Trash2,
-    Edit2,
     Bell,
     Search,
     ArrowRight,
@@ -39,13 +38,17 @@ interface SavedSearch {
 }
 
 interface SearchCriteria {
-    q?: string;
+    q?: string | string[];
     region?: string[];
     category?: string[];
     buyer?: string[];
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
+
+interface SessionWithAccessToken {
+    accessToken?: string;
+}
 
 export default function SavedSearchesPage() {
     const { data: session, status } = useSession();
@@ -53,7 +56,6 @@ export default function SavedSearchesPage() {
     const [searches, setSearches] = useState<SavedSearch[]>([]);
     const [loading, setLoading] = useState(true);
     const [isCreateOpen, setIsCreateOpen] = useState(false);
-    const [editingSearch, setEditingSearch] = useState<SavedSearch | null>(null);
 
     // Form state
     const [name, setName] = useState('');
@@ -66,17 +68,13 @@ export default function SavedSearchesPage() {
         }
     }, [status, router]);
 
-    useEffect(() => {
-        if (session) {
-            fetchSearches();
-        }
-    }, [session]);
+    const accessToken = (session as SessionWithAccessToken | null)?.accessToken;
 
-    const fetchSearches = async () => {
+    const fetchSearches = useCallback(async () => {
         try {
             const res = await fetch(`${API_BASE}/saved-searches`, {
                 headers: {
-                    'Authorization': `Bearer ${(session as any)?.accessToken}`,
+                    'Authorization': `Bearer ${accessToken}`,
                 },
             });
             if (res.ok) {
@@ -88,7 +86,13 @@ export default function SavedSearchesPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [accessToken]);
+
+    useEffect(() => {
+        if (session) {
+            fetchSearches();
+        }
+    }, [session, fetchSearches]);
 
     const handleCreate = async () => {
         if (!name.trim()) return;
@@ -102,7 +106,7 @@ export default function SavedSearchesPage() {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${(session as any)?.accessToken}`,
+                    'Authorization': `Bearer ${accessToken}`,
                 },
                 body: JSON.stringify({ name, criteria }),
             });
@@ -127,7 +131,7 @@ export default function SavedSearchesPage() {
             await fetch(`${API_BASE}/saved-searches/${id}`, {
                 method: 'DELETE',
                 headers: {
-                    'Authorization': `Bearer ${(session as any)?.accessToken}`,
+                    'Authorization': `Bearer ${accessToken}`,
                 },
             });
             fetchSearches();
@@ -146,8 +150,9 @@ export default function SavedSearchesPage() {
 
     const getCriteriaDisplay = (criteriaStr: string) => {
         const criteria = parseCriteria(criteriaStr);
+        const query = Array.isArray(criteria.q) ? criteria.q.join(' ') : criteria.q;
         const parts: string[] = [];
-        if (criteria.q) parts.push(`"${criteria.q}"`);
+        if (query) parts.push(`"${query}"`);
         if (criteria.region?.length) parts.push(`in ${criteria.region.join(', ')}`);
         if (criteria.category?.length) parts.push(`(${criteria.category.join(', ')})`);
         return parts.length ? parts.join(' ') : 'All tenders';
@@ -162,33 +167,33 @@ export default function SavedSearchesPage() {
     }
 
     return (
-        <div className="container mx-auto py-8 px-4 max-w-4xl">
+        <div className="container mx-auto max-w-4xl px-4 py-6 sm:py-8">
             {/* Back Link */}
-            <Link href="/dashboard" className="inline-flex items-center text-slate-600 hover:text-emerald-600 mb-6 text-sm font-medium transition-colors">
+            <Link href="/dashboard" className="mb-5 inline-flex items-center text-sm font-medium text-slate-600 transition-colors hover:text-emerald-600 sm:mb-6">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Back to Dashboard
             </Link>
 
             {/* Header */}
-            <div className="flex items-center justify-between mb-8">
+            <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Bookmark className="w-6 h-6 text-emerald-500" />
+                    <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 sm:text-2xl">
+                        <Bookmark className="h-5 w-5 text-emerald-500 sm:h-6 sm:w-6" />
                         Saved Searches
                     </h1>
-                    <p className="text-gray-600 mt-1">
+                    <p className="mt-1 text-sm text-gray-600 sm:text-base">
                         Get email alerts when new tenders match your criteria
                     </p>
                 </div>
 
                 <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
                     <DialogTrigger asChild>
-                        <Button className="bg-emerald-500 hover:bg-emerald-600">
+                        <Button className="w-full bg-emerald-500 hover:bg-emerald-600 sm:w-auto">
                             <Plus className="w-4 h-4 mr-2" />
                             New Search
                         </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className="max-w-[calc(100%-1rem)] sm:max-w-lg">
                         <DialogHeader>
                             <DialogTitle>Create Saved Search</DialogTitle>
                             <DialogDescription>
@@ -216,7 +221,7 @@ export default function SavedSearchesPage() {
                                     className="mt-1"
                                 />
                             </div>
-                            <div className="flex gap-2 justify-end">
+                            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                                 <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
                                     Cancel
                                 </Button>
@@ -235,7 +240,7 @@ export default function SavedSearchesPage() {
 
             {/* Searches List */}
             {searches.length === 0 ? (
-                <Card className="text-center py-12">
+                <Card className="py-10 text-center sm:py-12">
                     <CardContent>
                         <Search className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                         <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -255,9 +260,9 @@ export default function SavedSearchesPage() {
                     {searches.map((search) => (
                         <Card key={search.id} className="hover:shadow-md transition-shadow">
                             <CardContent className="p-4">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex-1">
-                                        <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="min-w-0 flex-1">
+                                        <h3 className="flex items-center gap-2 break-words font-semibold text-gray-900">
                                             {search.name}
                                             {search.alertsEnabled && (
                                                 <Bell className="w-4 h-4 text-emerald-500" />
@@ -272,11 +277,12 @@ export default function SavedSearchesPage() {
                                             </p>
                                         )}
                                     </div>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 sm:justify-end">
                                         <Link
-                                            href={`/tenders?q=${encodeURIComponent(parseCriteria(search.criteria).q || '')}`}
+                                            href={`/tenders?q=${encodeURIComponent(getQueryFromCriteria(search.criteria))}`}
+                                            className="flex-1 sm:flex-none"
                                         >
-                                            <Button variant="outline" size="sm">
+                                            <Button variant="outline" size="sm" className="w-full sm:w-auto">
                                                 View Results
                                                 <ArrowRight className="w-4 h-4 ml-1" />
                                             </Button>
@@ -311,4 +317,13 @@ export default function SavedSearchesPage() {
             </div>
         </div>
     );
+}
+
+function getQueryFromCriteria(criteriaStr: string) {
+    try {
+        const criteria = JSON.parse(criteriaStr) as SearchCriteria;
+        return Array.isArray(criteria.q) ? criteria.q.join(' ') : criteria.q || '';
+    } catch {
+        return '';
+    }
 }

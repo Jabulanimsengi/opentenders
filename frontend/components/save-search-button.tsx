@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Heart } from "lucide-react"
 
+type SavedSearchCriteria = Record<string, string | string[]>
+
 export function SaveSearchButton({ isLoggedIn }: { isLoggedIn: boolean }) {
     const [open, setOpen] = useState(false)
     const [name, setName] = useState("")
@@ -35,10 +37,11 @@ export function SaveSearchButton({ isLoggedIn }: { isLoggedIn: boolean }) {
         }
 
         setLoading(true)
-        const criteria: any = {}
+        const criteria: SavedSearchCriteria = {}
+        const arrayParams = new Set(['region', 'category', 'buyer', 'status'])
         searchParams.forEach((value, key) => {
             if (key !== 'page') { // Don't save page number
-                criteria[key] = value.split(',')
+                criteria[key] = arrayParams.has(key) ? value.split(',') : value
             }
         })
 
@@ -53,7 +56,7 @@ export function SaveSearchButton({ isLoggedIn }: { isLoggedIn: boolean }) {
                 setName("")
                 // Maybe show toast success
             }
-        } catch (e) { }
+        } catch { }
         setLoading(false)
     }
 

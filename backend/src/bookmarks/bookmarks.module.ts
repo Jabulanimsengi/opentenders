@@ -4,9 +4,9 @@ import { BookmarksService } from './bookmarks.service';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
-    imports: [PrismaModule],
-    controllers: [BookmarksController],
-    providers: [BookmarksService],
-    exports: [BookmarksService],
+  imports: [PrismaModule],
+  controllers: [BookmarksController],
+  providers: [BookmarksService],
+  exports: [BookmarksService],
 })
-export class BookmarksModule { }
+export class BookmarksModule {}

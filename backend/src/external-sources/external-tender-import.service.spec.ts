@@ -56,7 +56,26 @@ describe('ExternalTenderImportService', () => {
         sourceName: 'Example Municipality',
         sourceUrl: 'https://example.gov.za/docs/rfq-42.pdf',
         tenderNumber: 'RFQ 42/2026',
+        category: 'Cleaning & Hygiene',
         closingDate: expect.any(Date),
+      }),
+    });
+  });
+
+  it('infers useful categories from scraped text when the source category is generic', async () => {
+    prisma.tender.findFirst.mockResolvedValue(null);
+
+    await service.importResults(source, [
+      {
+        title: 'Provision of endpoint backup and server support',
+        category: 'Services',
+        sourceUrl: 'https://example.gov.za/docs/it-support.pdf',
+      },
+    ]);
+
+    expect(prisma.tender.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        category: 'IT & Digital Services',
       }),
     });
   });

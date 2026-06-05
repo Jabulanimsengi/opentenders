@@ -3,9 +3,6 @@ import Image from 'next/image';
 import { TopNavbar } from '@/components/top-navbar';
 import { auth } from '@/auth';
 
-// Force dynamic rendering to ensure session is always fresh
-export const dynamic = 'force-dynamic';
-
 export default async function LandingLayout({ children }: { children: React.ReactNode }) {
     const session = await auth();
 
@@ -20,17 +17,17 @@ export default async function LandingLayout({ children }: { children: React.Reac
             </main>
 
             {/* Footer */}
-            <footer className="bg-gray-900 text-gray-400 py-12">
+            <footer className="bg-gray-900 py-8 text-gray-400 sm:py-12">
                 <div className="container mx-auto px-4">
-                    <div className="grid md:grid-cols-4 gap-8">
+                    <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-4 md:gap-8">
                         <div>
-                            <div className="mb-4">
+                            <div className="mb-3 sm:mb-4">
                                 <Image
                                     src="/logo.png"
                                     alt="Open Tenders"
                                     width={220}
                                     height={80}
-                                    className="h-20 w-auto brightness-0 invert"
+                                    className="h-12 w-auto object-contain brightness-0 invert sm:h-16"
                                 />
                             </div>
                             <p className="text-sm">Your gateway to South African government tender opportunities.</p>
@@ -59,7 +56,7 @@ export default async function LandingLayout({ children }: { children: React.Reac
                             </ul>
                         </div>
                     </div>
-                    <div className="border-t border-gray-800 mt-8 pt-8 text-sm text-center">
+                    <div className="mt-6 border-t border-gray-800 pt-6 text-center text-sm sm:mt-8 sm:pt-8">
                         © {new Date().getFullYear()} Open Tenders. All rights reserved.
                     </div>
                 </div>

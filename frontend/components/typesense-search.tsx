@@ -14,7 +14,7 @@ import {
 } from 'react-instantsearch';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, Building2, MapPin, Clock, Plus, Lock } from 'lucide-react';
+import { Calendar, Building2, MapPin, Clock, Plus, Lock, Megaphone } from 'lucide-react';
 import Link from 'next/link';
 import { format, isPast, differenceInDays } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -48,6 +48,7 @@ function TenderHit({ hit, isSubscriber = false }: { hit: any; isSubscriber?: boo
     const isClosed = closingDate ? isPast(closingDate) : false;
     const daysLeft = closingDate && !isClosed ? differenceInDays(closingDate, new Date()) : null;
     const isClosingSoon = daysLeft !== null && daysLeft <= 7;
+    const advertisedSource = hit.sourceName || labelSourceType(hit.sourceType);
 
     const handleCardClick = (e: React.MouseEvent) => {
         // Allow the link to work unless clicking on the bookmark button or expand button
@@ -109,6 +110,12 @@ function TenderHit({ hit, isSubscriber = false }: { hit: any; isSubscriber?: boo
                                             {hit.region}
                                         </span>
                                     )}
+                                    {advertisedSource && (
+                                        <span className="flex min-w-0 items-center gap-1">
+                                            <Megaphone className="w-3.5 h-3.5 shrink-0" />
+                                            <span className="max-w-[200px] truncate">{advertisedSource}</span>
+                                        </span>
+                                    )}
                                 </div>
 
                                 {/* Dates Row */}
@@ -116,7 +123,7 @@ function TenderHit({ hit, isSubscriber = false }: { hit: any; isSubscriber?: boo
                                     {publishedDate && (
                                         <span className="flex items-center gap-1">
                                             <Calendar className="w-3 h-3" />
-                                            Advertised: {format(publishedDate, 'dd MMM yyyy')}
+                                            {formatAdvertisedDate(publishedDate)}
                                         </span>
                                     )}
                                     {closingDate && (
@@ -249,6 +256,23 @@ function TenderHit({ hit, isSubscriber = false }: { hit: any; isSubscriber?: boo
             )}
         </div>
     );
+}
+
+function formatAdvertisedDate(date: Date | null) {
+    if (!date || Number.isNaN(date.getTime()) || date.getFullYear() <= 1971) {
+        return 'Advertised date unavailable';
+    }
+
+    return `Advertised: ${format(date, 'dd MMM yyyy')}`;
+}
+
+function labelSourceType(sourceType?: string) {
+    if (!sourceType) return '';
+    return sourceType
+        .split(/[_\s-]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
 }
 
 // No Results Component

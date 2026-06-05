@@ -1,7 +1,30 @@
 import { prisma } from '@/lib/prisma';
+import { buildTenderSmartSearchCondition } from '@/lib/smart-search';
+import { Prisma } from '@prisma/client';
+
+interface SavedSearchWithUser {
+    id: string;
+    name: string;
+    criteria: string;
+    lastAlertedAt: Date | null;
+    createdAt: Date;
+    user: {
+        email: string;
+    };
+}
+
+interface SavedSearchStore {
+    findMany(args: unknown): Promise<SavedSearchWithUser[]>;
+    update(args: unknown): Promise<unknown>;
+}
+
+type PrismaWithSavedSearches = typeof prisma & {
+    savedSearch: SavedSearchStore;
+};
 
 export async function processAlerts() {
-    const savedSearches = await (prisma as any).savedSearch.findMany({
+    const db = prisma as PrismaWithSavedSearches;
+    const savedSearches = await db.savedSearch.findMany({
         include: { user: true }
     });
 
@@ -12,14 +35,15 @@ export async function processAlerts() {
         const lastCheck = search.lastAlertedAt || search.createdAt;
 
         // Construct dynamic where clause from JSON criteria
-        const where: any = {
+        const where: Prisma.TenderWhereInput = {
             createdAt: { gt: lastCheck } // Only find NEWLY ingested tenders
         };
 
-        if (criteria.q) {
-            where.OR = [
-                { title: { contains: criteria.q } },
-                { description: { contains: criteria.q } }
+        const searchCondition = buildTenderSmartSearchCondition(criteria.q);
+        if (searchCondition) {
+            where.AND = [
+                ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+                searchCondition,
             ];
         }
         if (criteria.region) where.region = { in: criteria.region };
@@ -32,7 +56,7 @@ export async function processAlerts() {
             // Here we would send the email
             console.log(`[ALERT] Sending email to ${search.user.email} for search "${search.name}" - Found ${matchingTenders.length} new tenders.`);
 
-            await (prisma as any).savedSearch.update({
+            await db.savedSearch.update({
                 where: { id: search.id },
                 data: { lastAlertedAt: new Date() }
             });

@@ -37,7 +37,7 @@ export default function BookmarksPage() {
     const [loading, setLoading] = useState(true);
     const [deleting, setDeleting] = useState<string | null>(null);
 
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
 
     useEffect(() => {
         if (status === 'unauthenticated') {
@@ -106,8 +106,8 @@ export default function BookmarksPage() {
 
     if (loading) {
         return (
-            <div className="container mx-auto py-10 px-4 max-w-4xl">
-                <div className="flex items-center justify-center py-20">
+            <div className="container mx-auto max-w-4xl px-4 py-6 sm:py-10">
+                <div className="flex items-center justify-center py-16 sm:py-20">
                     <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
                 </div>
             </div>
@@ -115,26 +115,26 @@ export default function BookmarksPage() {
     }
 
     return (
-        <div className="container mx-auto py-10 px-4 max-w-4xl">
+        <div className="container mx-auto max-w-4xl px-4 py-6 sm:py-10">
             {/* Header */}
-            <div className="mb-8">
-                <Link href="/dashboard" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4">
+            <div className="mb-6 sm:mb-8">
+                <Link href="/dashboard" className="mb-4 inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
                     <ArrowLeft className="w-4 h-4 mr-1" /> Back to Dashboard
                 </Link>
-                <div className="flex items-center gap-3">
-                    <div className="p-2 bg-amber-100 rounded-lg">
-                        <Bookmark className="w-6 h-6 text-amber-600" />
+                <div className="flex items-start gap-3">
+                    <div className="rounded-lg bg-amber-100 p-2">
+                        <Bookmark className="h-5 w-5 text-amber-600 sm:h-6 sm:w-6" />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Saved Tenders</h1>
-                        <p className="text-muted-foreground">Your watchlist of bookmarked tenders</p>
+                        <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">Saved Tenders</h1>
+                        <p className="text-sm text-muted-foreground sm:text-base">Your watchlist of bookmarked tenders</p>
                     </div>
                 </div>
             </div>
 
             {/* Bookmarks List */}
             {bookmarks.length === 0 ? (
-                <Card className="text-center py-16">
+                <Card className="py-10 text-center sm:py-16">
                     <CardContent>
                         <Bookmark className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                         <h3 className="text-lg font-medium text-gray-900 mb-2">No saved tenders yet</h3>
@@ -162,9 +162,9 @@ export default function BookmarksPage() {
                                 isClosed ? "border-l-red-500" : "border-l-emerald-500"
                             )}>
                                 <CardContent className="p-4">
-                                    <div className="flex items-start justify-between gap-4">
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-1">
+                                            <div className="mb-1 flex flex-wrap items-center gap-2">
                                                 <Badge variant={isClosed ? "destructive" : "default"} className="text-xs">
                                                     {isClosed ? 'Closed' : tender.status || 'Active'}
                                                 </Badge>
@@ -180,7 +180,7 @@ export default function BookmarksPage() {
                                                 {tender.title}
                                             </Link>
 
-                                            <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-muted-foreground">
+                                            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground sm:gap-4">
                                                 {tender.buyerName && (
                                                     <span className="flex items-center gap-1">
                                                         <Building2 className="w-3.5 h-3.5" />
@@ -199,8 +199,8 @@ export default function BookmarksPage() {
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            <Link href={`/tenders/${tender.slug || tender.id}`}>
+                                        <div className="flex shrink-0 items-center gap-2 sm:justify-end">
+                                            <Link href={`/tenders/${tender.slug || tender.id}`} className="flex-1 sm:flex-none">
                                                 <Button variant="outline" size="sm">
                                                     View
                                                 </Button>

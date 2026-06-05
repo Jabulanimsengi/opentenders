@@ -7,6 +7,7 @@ import {
   firstSupportedAdvertisedDate,
   recentUndatedTenderThreshold,
 } from '../tenders/tender-date-rules';
+import { buildTenderCategorySearchText } from '../tenders/tender-categories';
 
 export type TenderSearchDocument = {
   id: string;
@@ -16,6 +17,7 @@ export type TenderSearchDocument = {
   region: string;
   province: string;
   category: string;
+  categoryKeywords: string;
   status: string;
   tenderNumber: string;
   referenceNumber: string;
@@ -103,6 +105,7 @@ export class TypesenseService implements OnModuleInit {
         { name: 'region', type: 'string', optional: true, facet: true },
         { name: 'province', type: 'string', optional: true, facet: true },
         { name: 'category', type: 'string', optional: true, facet: true },
+        { name: 'categoryKeywords', type: 'string', optional: true },
         { name: 'status', type: 'string', optional: true, facet: true },
         { name: 'tenderNumber', type: 'string', optional: true },
         { name: 'referenceNumber', type: 'string', optional: true },
@@ -189,8 +192,8 @@ export class TypesenseService implements OnModuleInit {
       .search({
         q: params.q?.trim() || '*',
         query_by:
-          'title,description,buyerName,category,region,province,tenderNumber,referenceNumber,sourceName',
-        query_by_weights: '5,2,4,3,3,3,4,4,2',
+          'title,categoryKeywords,description,buyerName,category,region,province,tenderNumber,referenceNumber,sourceName',
+        query_by_weights: '5,5,2,4,3,3,3,4,4,2',
         filter_by: filterBy || undefined,
         sort_by: params.q?.trim()
           ? '_text_match:desc,publishedDate:desc'
@@ -217,6 +220,7 @@ export class TypesenseService implements OnModuleInit {
       region: tender.region || '',
       province: tender.province || '',
       category: tender.category || '',
+      categoryKeywords: buildTenderCategorySearchText(tender.category),
       status: tender.status || 'active',
       tenderNumber: tender.tenderNumber || '',
       referenceNumber: tender.referenceNumber || '',
@@ -253,13 +257,15 @@ export class TypesenseService implements OnModuleInit {
   }
 
   private statusFilter(status?: string[]) {
-    const selected = status?.length ? status : ['active'];
+    const selected = (status || []).filter(Boolean);
     const now = Date.now();
     const firstSupportedAdvertised = firstSupportedAdvertisedDate().getTime();
     const recentUndated = recentUndatedTenderThreshold(new Date(now)).getTime();
     const inSevenDays = now + 7 * 24 * 60 * 60 * 1000;
     const validAdvertisedDate = `publishedDate:>=${firstSupportedAdvertised} && publishedDate:<=${now}`;
     const conditions: string[] = [];
+
+    if (selected.length === 0) return validAdvertisedDate;
 
     if (selected.includes('active')) {
       conditions.push(
@@ -285,7 +291,7 @@ export class TypesenseService implements OnModuleInit {
 
     return conditions.length > 1
       ? `(${conditions.map((condition) => `(${condition})`).join(' || ')})`
-      : conditions[0] || '';
+      : conditions[0] || validAdvertisedDate;
   }
 
   private enumFilter(field: string, values?: string[]) {

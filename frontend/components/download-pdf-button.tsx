@@ -78,7 +78,7 @@ export function DownloadPDFButton({ tender, disabled = false }: DownloadPDFButto
 
     <div class="section">
         <div class="section-title">Important Dates</div>
-        <div class="field"><span class="field-label">Published:</span> <span class="field-value">${tender.publishedDate ? new Date(tender.publishedDate).toLocaleDateString() : 'N/A'}</span></div>
+        <div class="field"><span class="field-label">Advertised:</span> <span class="field-value">${tender.publishedDate ? new Date(tender.publishedDate).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}</span></div>
         <div class="field"><span class="field-label">Closing Date:</span> <span class="field-value">${tender.closingDate ? new Date(tender.closingDate).toLocaleDateString() : 'N/A'}</span></div>
         ${tender.briefingDate ? `<div class="field"><span class="field-label">Briefing Date:</span> <span class="field-value">${new Date(tender.briefingDate).toLocaleDateString()}${tender.briefingCompulsory ? ' (Compulsory)' : ''}</span></div>` : ''}
         ${tender.briefingVenue ? `<div class="field"><span class="field-label">Briefing Venue:</span> <span class="field-value">${tender.briefingVenue}</span></div>` : ''}

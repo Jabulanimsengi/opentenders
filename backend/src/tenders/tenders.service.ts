@@ -34,30 +34,30 @@ export class TendersService {
       region,
       category,
       buyer,
+      awarded,
     } = query;
     const searchTerm = q || queryAlias;
-    const typesenseResult = await this.findAllWithTypesense(
-      query,
-      accessLevel,
-    );
+    const typesenseResult = await this.findAllWithTypesense(query, accessLevel);
     if (typesenseResult) return typesenseResult;
 
     const skip = (page - 1) * limit;
     const now = new Date();
 
     const where: any = {};
+    const andConditions: any[] = [];
 
     const searchCondition = buildTenderSmartSearchCondition(searchTerm);
     if (searchCondition) {
-      where.AND = [searchCondition];
+      andConditions.push(searchCondition);
     }
 
-    // Status filter with computed values. Default listing is active only.
-    const selectedStatus = status?.length ? status : ['active'];
-    if (selectedStatus.length > 0) {
+    const selectedStatus = (status || []).filter(Boolean);
+    const validAdvertisedDateWhere = buildValidAdvertisedDateWhere(now);
+    if (selectedStatus.length === 0) {
+      andConditions.push(validAdvertisedDateWhere);
+    } else {
       const statusConditions: any[] = [];
       const inSevenDays = addDays(now, 7);
-      const validAdvertisedDateWhere = buildValidAdvertisedDateWhere(now);
 
       if (selectedStatus.includes('active')) {
         statusConditions.push(buildActiveTenderWhere(now));
@@ -87,25 +87,33 @@ export class TendersService {
       }
 
       if (statusConditions.length > 0) {
-        if (where.AND?.length) {
-          where.AND.push({ OR: statusConditions });
-        } else {
-          where.OR = statusConditions;
-        }
+        andConditions.push({ OR: statusConditions });
+      } else {
+        andConditions.push(validAdvertisedDateWhere);
       }
     }
 
     if (region && region.length > 0) where.region = { in: region };
     if (category && category.length > 0) where.category = { in: category };
     if (buyer && buyer.length > 0) where.buyerName = { in: buyer };
+    if (awarded) where.awards = { some: {} };
+    if (andConditions.length > 0) where.AND = andConditions;
+
+    const findManyArgs: any = {
+      where,
+      orderBy: { publishedDate: 'desc' },
+      skip,
+      take: limit,
+    };
+
+    if (awarded) {
+      findManyArgs.include = {
+        awards: { orderBy: { date: 'desc' }, take: 3 },
+      };
+    }
 
     const [tenders, total] = await Promise.all([
-      this.prisma.tender.findMany({
-        where,
-        orderBy: { publishedDate: 'desc' },
-        skip,
-        take: limit,
-      }),
+      this.prisma.tender.findMany(findManyArgs),
       this.prisma.tender.count({ where }),
     ]);
     const displayableTenders = tenders.filter((tender) =>
@@ -131,6 +139,7 @@ export class TendersService {
     accessLevel: TenderAccessLevel,
   ) {
     if (!this.typesense?.isReady()) return null;
+    if (query.awarded) return null;
 
     try {
       const page = query.page || 1;
@@ -243,8 +252,8 @@ export class TendersService {
       this.prisma.tender.count({
         where: { status: 'cancelled', ...validAdvertisedDateWhere },
       }),
-      // Use raw query for Award count since client generation failed
-      this.prisma.$queryRaw<any[]>`SELECT COUNT(*) as count FROM Award`
+      // Use raw query for Award count since client generation can lag in prod.
+      this.prisma.$queryRaw<any[]>`SELECT COUNT(*)::int as count FROM "Award"`
         .then((r: any) => Number(r[0].count))
         .catch(() => 0),
     ]);

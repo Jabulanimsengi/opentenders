@@ -3,14 +3,16 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Tender {
-  id              String    @id @default(uuid())
-  ocid            String    @unique
-  slug            String?   @unique
+  id              String   @id @default(uuid())
+  ocid            String   @unique
+  slug            String?  @unique
+  tenderNumber    String?
+  referenceNumber String?
   publishedDate   DateTime
   title           String
   description     String?
@@ -18,35 +20,45 @@ model Tender {
   category        String?
   region          String?
   province        String?
-  
-  closingDate     DateTime?
-  briefingDate    DateTime?
-  briefingVenue   String?
-  briefingCompulsory Boolean @default(false)
-  
-  buyerName       String?
-  
+
+  closingDate        DateTime?
+  briefingDate       DateTime?
+  briefingVenue      String?
+  briefingCompulsory Boolean   @default(false)
+
+  buyerName    String?
+  buyerType    String?
+  municipality String?
+
   // Contact person
-  contactName     String?
-  contactEmail    String?
-  contactPhone    String?
-  
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
   // Value
-  estimatedValue  Float?
-  currency        String?   @default("ZAR")
-  
+  estimatedValue Float?
+  currency       String? @default("ZAR")
+
   // Requirements
   eligibilityCriteria String?
   specialConditions   String?
   submissionMethod    String?
-  
+  submissionAddress   String?
+  documentUrls        String?
+  sourceName          String?
+  sourceType          String?
+  sourceUrl           String?
+  sourceHash          String?
+  rawHtmlHash         String?
+  scrapedAt           DateTime?
+
   // JSON string of the full record for archival/extra details
-  rawData         String? 
+  rawData String?
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  awards          Award[]
+  awards Award[]
 
   @@index([status])
   @@index([closingDate])
@@ -56,72 +68,144 @@ model Tender {
   @@index([province])
   @@index([publishedDate])
   @@index([slug])
+  @@index([tenderNumber])
+  @@index([referenceNumber])
+  @@index([sourceUrl])
+  @@index([sourceHash])
 }
 
 model Award {
-  id            String    @id @default(uuid())
-  tenderId      String
-  tender        Tender    @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-  
-  supplierName  String
-  amount        Float?
-  currency      String    @default("ZAR")
-  date          DateTime?
-  
-  createdAt     DateTime  @default(now())
+  id       String @id @default(uuid())
+  tenderId String
+  tender   Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
 
+  supplierName String
+  amount       Float?
+  currency     String    @default("ZAR")
+  date         DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([tenderId, supplierName])
   @@index([tenderId])
   @@index([supplierName])
-  @@unique([tenderId, supplierName])
 }
 
 model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  password      String // Hashed
-  name          String?
-  role          String    @default("user") // user, admin
-  createdAt     DateTime  @default(now())
-  
-  savedSearches SavedSearch[]
-  subscription  Subscription?
-  bookmarks     Bookmark[]
+  id              String    @id @default(uuid())
+  email           String    @unique
+  password        String? // Hashed; null for OAuth-only users
+  name            String?
+  role            String    @default("user") // user, admin
+  authProvider    String    @default("email") // email, google
+  emailVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+
+  savedSearches           SavedSearch[]
+  subscription            Subscription?
+  bookmarks               Bookmark[]
+  emailVerificationTokens EmailVerificationToken[]
+  ownedOrganizations      Organization[]           @relation("OrganizationOwner")
+  organizationMemberships OrganizationMember[]
 }
 
 model Subscription {
-  id          String    @id @default(uuid())
-  userId      String    @unique
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  plan        String    @default("free") // free, solo, team, enterprise
-  status      String    @default("active") // active, cancelled, expired, trial
-  
-  startDate   DateTime  @default(now())
-  endDate     DateTime?
-  
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  plan   String @default("free") // free, solo, team, enterprise
+  status String @default("active") // active, cancelled, expired, trial
+
+  startDate DateTime  @default(now())
+  endDate   DateTime?
+
+  stripeCustomerId     String? @unique
+  stripeSubscriptionId String? @unique
+  stripePriceId        String?
+  stripeCheckoutId     String?
+
   // For team plans
-  teamSize    Int       @default(1)
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
+  teamSize       Int           @default(1)
+  organizationId String?       @unique
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
+  @@index([organizationId])
   @@index([plan])
+  @@index([status])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  ownerId   String
+  owner     User     @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscription Subscription?
+  members      OrganizationMember[]
+
+  @@index([ownerId])
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  invitedEmail   String
+  role           String       @default("member") // owner, admin, member
+  status         String       @default("invited") // invited, active, removed
+  joinedAt       DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, invitedEmail])
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
   @@index([status])
 }
 
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
 model SavedSearch {
-  id            String    @id @default(uuid())
-  name          String
-  userId        String
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id     String @id @default(uuid())
+  name   String
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // Stored as JSON string: { "region": ["Gauteng"], "q": "IT" }
-  criteria      String 
-  
+  criteria String
+
+  // Alert settings
+  alertsEnabled  Boolean @default(false)
+  alertFrequency String  @default("daily") // daily, weekly
+
   lastAlertedAt DateTime?
   createdAt     DateTime  @default(now())
-  
+
   @@index([userId])
 }
 
@@ -132,9 +216,101 @@ model Bookmark {
   tenderId  String
   notes     String?
   createdAt DateTime @default(now())
-  
+
+  tenderNotes TenderNote[]
+
   @@unique([userId, tenderId])
   @@index([userId])
   @@index([tenderId])
 }
 
+model TenderNote {
+  id         String   @id @default(uuid())
+  userId     String
+  tenderId   String
+  bookmarkId String
+  bookmark   Bookmark @relation(fields: [bookmarkId], references: [id], onDelete: Cascade)
+  content    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@index([tenderId])
+  @@index([bookmarkId])
+}
+
+model TenderSource {
+  id                     String    @id @default(uuid())
+  name                   String
+  sourceType             String
+  baseUrl                String
+  tenderUrl              String
+  province               String?
+  organisationName       String?
+  scrapeMethod           String
+  active                 Boolean   @default(true)
+  scrapeFrequencyHours   Int       @default(24)
+  scrapeFrequencyMinutes Int       @default(1440)
+  lastScrapedAt          DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  scrapeRuns ExternalScrapeRun[]
+
+  @@index([active])
+  @@index([sourceType])
+  @@index([province])
+}
+
+model ExternalScrapeRun {
+  id                      String    @id @default(uuid())
+  sourceId                String?
+  sourceName              String
+  startedAt               DateTime  @default(now())
+  finishedAt              DateTime?
+  status                  String
+  numberOfTendersFound    Int       @default(0)
+  numberOfTendersCreated  Int       @default(0)
+  numberOfTendersUpdated  Int       @default(0)
+  numberOfDuplicatesFound Int       @default(0)
+  errorMessage            String?
+  pagesVisited            Int       @default(0)
+
+  source TenderSource?         @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  errors ExternalScrapeError[]
+
+  @@index([sourceId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model ExternalScrapeError {
+  id         String   @id @default(uuid())
+  runId      String?
+  sourceId   String?
+  sourceName String?
+  url        String?
+  message    String
+  stack      String?
+  createdAt  DateTime @default(now())
+
+  run ExternalScrapeRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([runId])
+  @@index([sourceId])
+  @@index([createdAt])
+}
+
+model ExternalTenderChangeLog {
+  id        String   @id @default(uuid())
+  tenderId  String
+  sourceId  String?
+  field     String
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+
+  @@index([tenderId])
+  @@index([sourceId])
+  @@index([createdAt])
+}

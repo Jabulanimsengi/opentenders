@@ -1,60 +1,110 @@
 import { Injectable, Logger } from '@nestjs/common';
-import sgMail from '@sendgrid/mail';
 
 export interface EmailOptions {
-    to: string;
-    subject: string;
-    html: string;
-    text?: string;
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
 }
 
 @Injectable()
 export class EmailService {
-    private readonly logger = new Logger(EmailService.name);
-    private readonly fromEmail = process.env.SENDGRID_FROM_EMAIL || 'alerts@opentenderportal.co.za';
-    private readonly fromName = 'Open Tender Portal';
+  private readonly logger = new Logger(EmailService.name);
+  private readonly fromEmail =
+    process.env.RESEND_FROM_EMAIL || 'alerts@opentenderportal.co.za';
+  private readonly fromName =
+    process.env.RESEND_FROM_NAME || 'Open Tender Portal';
 
-    constructor() {
-        const apiKey = process.env.SENDGRID_API_KEY;
-        if (apiKey) {
-            sgMail.setApiKey(apiKey);
-            this.logger.log('SendGrid initialized');
-        } else {
-            this.logger.warn('SENDGRID_API_KEY not set - emails will not be sent');
-        }
+  constructor() {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (apiKey) {
+      this.logger.log('Resend initialized');
+    } else {
+      this.logger.warn('RESEND_API_KEY not set - emails will not be sent');
+    }
+  }
+
+  async sendEmail(options: EmailOptions): Promise<boolean> {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      this.logger.warn(
+        `Email not sent (no API key): ${options.subject} to ${options.to}`,
+      );
+      return false;
     }
 
-    async sendEmail(options: EmailOptions): Promise<boolean> {
-        if (!process.env.SENDGRID_API_KEY) {
-            this.logger.warn(`Email not sent (no API key): ${options.subject} to ${options.to}`);
-            return false;
-        }
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: `${this.fromName} <${this.fromEmail}>`,
+          to: [options.to],
+          subject: options.subject,
+          html: options.html,
+          text: options.text || options.subject,
+        }),
+      });
 
-        try {
-            await sgMail.send({
-                to: options.to,
-                from: { email: this.fromEmail, name: this.fromName },
-                subject: options.subject,
-                html: options.html,
-                text: options.text || options.subject,
-            });
-            this.logger.log(`Email sent: ${options.subject} to ${options.to}`);
-            return true;
-        } catch (error: any) {
-            this.logger.error(`Failed to send email: ${error.message}`);
-            return false;
-        }
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Resend API ${response.status}: ${body}`);
+      }
+
+      this.logger.log(`Email sent: ${options.subject} to ${options.to}`);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to send email: ${message}`);
+      return false;
     }
+  }
 
-    // Email templates
-    async sendTenderMatchAlert(
-        to: string,
-        userName: string,
-        searchName: string,
-        tenders: { title: string; closingDate: string | null; slug: string }[],
-    ): Promise<boolean> {
-        const tenderList = tenders
-            .map(t => `
+  // Email templates
+  async sendEmailVerification(
+    to: string,
+    userName: string,
+    token: string,
+  ): Promise<boolean> {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    const verifyUrl = `${frontendUrl}/verify-email?token=${encodeURIComponent(token)}`;
+    const html = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: #0f172a; padding: 24px; text-align: center;">
+                    <h1 style="color: #10b981; margin: 0; font-size: 24px;">Open Tenders</h1>
+                </div>
+                <div style="padding: 24px; background: #fff;">
+                    <p style="color: #333; font-size: 16px;">Hi ${userName},</p>
+                    <p style="color: #666;">Please verify your email address to activate your Open Tenders account.</p>
+                    <a href="${verifyUrl}"
+                       style="display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 500;">
+                        Verify Email
+                    </a>
+                    <p style="color: #64748b; font-size: 12px; margin-top: 20px;">This link expires in 24 hours.</p>
+                </div>
+            </div>
+        `;
+
+    return this.sendEmail({
+      to,
+      subject: 'Verify your Open Tenders email address',
+      html,
+      text: `Verify your Open Tenders email address: ${verifyUrl}`,
+    });
+  }
+
+  async sendTenderMatchAlert(
+    to: string,
+    userName: string,
+    searchName: string,
+    tenders: { title: string; closingDate: string | null; slug: string }[],
+  ): Promise<boolean> {
+    const tenderList = tenders
+      .map(
+        (t) => `
                 <tr>
                     <td style="padding: 12px; border-bottom: 1px solid #eee;">
                         <a href="${process.env.FRONTEND_URL}/tenders/${t.slug}" style="color: #10b981; text-decoration: none; font-weight: 500;">
@@ -63,10 +113,11 @@ export class EmailService {
                         ${t.closingDate ? `<br><small style="color: #666;">Closes: ${t.closingDate}</small>` : ''}
                     </td>
                 </tr>
-            `)
-            .join('');
+            `,
+      )
+      .join('');
 
-        const html = `
+    const html = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                 <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); padding: 24px; text-align: center;">
                     <h1 style="color: #10b981; margin: 0; font-size: 24px;">Open Tender Portal</h1>
@@ -89,21 +140,31 @@ export class EmailService {
             </div>
         `;
 
-        return this.sendEmail({
-            to,
-            subject: `${tenders.length} New Tender(s) Match "${searchName}"`,
-            html,
-        });
-    }
+    return this.sendEmail({
+      to,
+      subject: `${tenders.length} New Tender(s) Match "${searchName}"`,
+      html,
+    });
+  }
 
-    async sendClosingReminder(
-        to: string,
-        userName: string,
-        tender: { title: string; closingDate: string; slug: string; daysRemaining: number },
-    ): Promise<boolean> {
-        const urgencyColor = tender.daysRemaining <= 1 ? '#ef4444' : tender.daysRemaining <= 3 ? '#f59e0b' : '#10b981';
+  async sendClosingReminder(
+    to: string,
+    userName: string,
+    tender: {
+      title: string;
+      closingDate: string;
+      slug: string;
+      daysRemaining: number;
+    },
+  ): Promise<boolean> {
+    const urgencyColor =
+      tender.daysRemaining <= 1
+        ? '#ef4444'
+        : tender.daysRemaining <= 3
+          ? '#f59e0b'
+          : '#10b981';
 
-        const html = `
+    const html = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                 <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); padding: 24px; text-align: center;">
                     <h1 style="color: #10b981; margin: 0; font-size: 24px;">Open Tender Portal</h1>
@@ -128,10 +189,38 @@ export class EmailService {
             </div>
         `;
 
-        return this.sendEmail({
-            to,
-            subject: `⏰ Tender Closing in ${tender.daysRemaining} Day(s): ${tender.title.substring(0, 50)}...`,
-            html,
-        });
-    }
+    return this.sendEmail({
+      to,
+      subject: `⏰ Tender Closing in ${tender.daysRemaining} Day(s): ${tender.title.substring(0, 50)}...`,
+      html,
+    });
+  }
+
+  async sendTeamInvite(
+    to: string,
+    inviterName: string,
+    organizationName: string,
+  ): Promise<boolean> {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    const html = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: #0f172a; padding: 24px; text-align: center;">
+                    <h1 style="color: #10b981; margin: 0; font-size: 24px;">Open Tenders</h1>
+                </div>
+                <div style="padding: 24px; background: #fff;">
+                    <p style="color: #333; font-size: 16px;">${inviterName} invited you to join ${organizationName} on Open Tenders.</p>
+                    <a href="${frontendUrl}/team"
+                       style="display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 500;">
+                        Open Team Dashboard
+                    </a>
+                </div>
+            </div>
+        `;
+
+    return this.sendEmail({
+      to,
+      subject: `You're invited to join ${organizationName} on Open Tenders`,
+      html,
+    });
+  }
 }

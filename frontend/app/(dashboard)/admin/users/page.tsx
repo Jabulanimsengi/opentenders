@@ -78,7 +78,7 @@ export default function AdminUsersPage() {
     const [newRole, setNewRole] = useState('');
     const [updating, setUpdating] = useState(false);
 
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
 
     // Check if user is admin
     useEffect(() => {
@@ -239,11 +239,11 @@ export default function AdminUsersPage() {
     }
 
     return (
-        <div className="container mx-auto py-8 px-4">
-            <div className="flex items-center justify-between mb-6">
+        <div className="container mx-auto px-4 py-6 sm:py-8">
+            <div className="mb-5 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Users className="w-6 h-6" />
+                    <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 sm:text-2xl">
+                        <Users className="h-5 w-5 sm:h-6 sm:w-6" />
                         User Management
                     </h1>
                     <p className="text-gray-500 text-sm mt-1">
@@ -258,7 +258,7 @@ export default function AdminUsersPage() {
             {/* Search */}
             <Card className="mb-6">
                 <CardContent className="pt-6">
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                         <div className="relative flex-1">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                             <Input
@@ -269,7 +269,7 @@ export default function AdminUsersPage() {
                                 className="pl-10"
                             />
                         </div>
-                        <Button onClick={handleSearch}>Search</Button>
+                        <Button onClick={handleSearch} className="w-full sm:w-auto">Search</Button>
                     </div>
                 </CardContent>
             </Card>
@@ -277,6 +277,7 @@ export default function AdminUsersPage() {
             {/* Users Table */}
             <Card>
                 <CardContent className="p-0">
+                    <div className="hidden overflow-x-auto md:block">
                     <Table>
                         <TableHeader>
                             <TableRow>
@@ -366,12 +367,80 @@ export default function AdminUsersPage() {
                             )}
                         </TableBody>
                     </Table>
+                    </div>
+                    <div className="space-y-3 p-3 md:hidden">
+                        {users.length === 0 ? (
+                            <div className="py-8 text-center text-sm text-gray-500">
+                                No users found
+                            </div>
+                        ) : (
+                            users.map((user) => (
+                                <div key={user.id} className="rounded-lg border border-gray-200 p-3">
+                                    <div className="break-words">
+                                        <p className="font-medium text-gray-900">{user.name || 'No name'}</p>
+                                        <p className="text-sm text-gray-500">{user.email}</p>
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                                        <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+                                            {user.role}
+                                        </Badge>
+                                        <Badge className={getPlanBadge(user.subscription?.plan || 'free')}>
+                                            {user.subscription?.plan || 'free'}
+                                        </Badge>
+                                        <Badge variant="outline">
+                                            {user.subscription?.status || 'active'}
+                                        </Badge>
+                                        <span className="text-xs text-gray-500">
+                                            {format(new Date(user.createdAt), 'dd MMM yyyy')}
+                                        </span>
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                setSelectedUser(user);
+                                                setNewPlan(user.subscription?.plan || 'free');
+                                                setPlanDialogOpen(true);
+                                            }}
+                                        >
+                                            <Crown className="mr-1 h-4 w-4" />
+                                            Plan
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                setSelectedUser(user);
+                                                setNewRole(user.role);
+                                                setRoleDialogOpen(true);
+                                            }}
+                                        >
+                                            <Shield className="mr-1 h-4 w-4" />
+                                            Role
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                                            onClick={() => {
+                                                setSelectedUser(user);
+                                                setDeleteDialogOpen(true);
+                                            }}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </CardContent>
             </Card>
 
             {/* Pagination */}
             {pagination.totalPages > 1 && (
-                <div className="flex justify-center gap-2 mt-4">
+                <div className="mt-4 flex items-center justify-center gap-2">
                     <Button
                         variant="outline"
                         size="sm"

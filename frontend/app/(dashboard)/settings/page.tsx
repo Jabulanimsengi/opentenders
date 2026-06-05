@@ -17,16 +17,43 @@ import {
 import { User, Bell, Clock, Database, LogOut, Check, Loader2, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
+
+type SubscriptionState = {
+    plan: string;
+    status: string;
+    endDate?: string | null;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+};
+
 export default function SettingsPage() {
     const { data: session } = useSession();
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
+    const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
+    const [billingLoading, setBillingLoading] = useState(false);
+    const [billingError, setBillingError] = useState<string | null>(null);
 
     // Alert preferences
     const [emailAlerts, setEmailAlerts] = useState(true);
     const [alertFrequency, setAlertFrequency] = useState('daily');
     const [closingReminders, setClosingReminders] = useState(true);
     const [reminderDays, setReminderDays] = useState('7');
+
+    useEffect(() => {
+        const token = (session as { accessToken?: string } | null)?.accessToken;
+        if (!token) return;
+
+        fetch(`${API_BASE}/subscriptions/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+        })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (data) setSubscription(data);
+            })
+            .catch(() => undefined);
+    }, [session]);
 
     const handleSave = async () => {
         setSaving(true);
@@ -36,18 +63,42 @@ export default function SettingsPage() {
         setTimeout(() => setSaved(false), 2000);
     };
 
+    const handleManageBilling = async () => {
+        const token = (session as { accessToken?: string } | null)?.accessToken;
+        if (!token) return;
+
+        setBillingLoading(true);
+        setBillingError(null);
+
+        try {
+            const response = await fetch(`${API_BASE}/subscriptions/portal`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok || !data?.url) {
+                throw new Error(data?.message || 'Unable to open billing portal.');
+            }
+            window.location.href = data.url;
+        } catch (err) {
+            setBillingError(err instanceof Error ? err.message : 'Unable to open billing portal.');
+        } finally {
+            setBillingLoading(false);
+        }
+    };
+
     return (
-        <div className="container mx-auto py-10 px-4 max-w-3xl">
+        <div className="container mx-auto max-w-3xl px-4 py-6 sm:py-10">
             {/* Back Link */}
-            <Link href="/dashboard" className="inline-flex items-center text-slate-600 hover:text-emerald-600 mb-6 text-sm font-medium transition-colors">
+            <Link href="/dashboard" className="mb-5 inline-flex items-center text-sm font-medium text-slate-600 transition-colors hover:text-emerald-600 sm:mb-6">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Back to Dashboard
             </Link>
 
-            <h1 className="text-3xl font-bold mb-2">Settings</h1>
-            <p className="text-muted-foreground mb-8">Manage your account and preferences.</p>
+            <h1 className="mb-2 text-2xl font-bold sm:text-3xl">Settings</h1>
+            <p className="mb-6 text-sm text-muted-foreground sm:mb-8 sm:text-base">Manage your account and preferences.</p>
 
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
                 {/* Profile Section */}
                 <Card>
                     <CardHeader>
@@ -71,6 +122,57 @@ export default function SettingsPage() {
                     </CardContent>
                 </Card>
 
+                {/* Subscription */}
+                <Card>
+                    <CardHeader>
+                        <div className="flex items-center gap-3">
+                            <Database className="w-5 h-5 text-emerald-500" />
+                            <div>
+                                <CardTitle>Subscription</CardTitle>
+                                <CardDescription>Manage billing and cancellation</CardDescription>
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                            <div>
+                                <p className="font-medium capitalize">
+                                    {subscription?.plan || 'free'} plan
+                                </p>
+                                <p className="text-sm text-muted-foreground capitalize">
+                                    Status: {subscription?.status || 'active'}
+                                    {subscription?.endDate
+                                        ? ` until ${new Date(subscription.endDate).toLocaleDateString()}`
+                                        : ''}
+                                </p>
+                            </div>
+                            {subscription?.plan && subscription.plan !== 'free' ? (
+                                <Button
+                                    variant="outline"
+                                    onClick={handleManageBilling}
+                                    disabled={billingLoading}
+                                    className="w-full sm:w-auto"
+                                >
+                                    {billingLoading ? (
+                                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Opening...</>
+                                    ) : (
+                                        'Manage Billing'
+                                    )}
+                                </Button>
+                            ) : (
+                                <Button asChild className="w-full bg-emerald-500 hover:bg-emerald-600 sm:w-auto">
+                                    <Link href="/pricing">Upgrade</Link>
+                                </Button>
+                            )}
+                        </div>
+                        {billingError && (
+                            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                {billingError}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+
                 {/* Email Alerts */}
                 <Card>
                     <CardHeader>
@@ -83,24 +185,24 @@ export default function SettingsPage() {
                         </div>
                     </CardHeader>
                     <CardContent className="space-y-5">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-4">
                             <div>
                                 <p className="font-medium">Email Notifications</p>
                                 <p className="text-sm text-muted-foreground">
                                     Get notified when tenders match saved searches
                                 </p>
                             </div>
-                            <Switch checked={emailAlerts} onCheckedChange={setEmailAlerts} />
+                            <Switch className="shrink-0" checked={emailAlerts} onCheckedChange={setEmailAlerts} />
                         </div>
 
                         {emailAlerts && (
-                            <div className="flex items-center justify-between pl-4 border-l-2 border-emerald-200">
+                            <div className="flex flex-col gap-3 border-l-2 border-emerald-200 pl-4 sm:flex-row sm:items-center sm:justify-between">
                                 <div>
                                     <p className="font-medium">Alert Frequency</p>
                                     <p className="text-sm text-muted-foreground">How often to send alerts</p>
                                 </div>
                                 <Select value={alertFrequency} onValueChange={setAlertFrequency}>
-                                    <SelectTrigger className="w-36">
+                                    <SelectTrigger className="w-full sm:w-36">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -126,24 +228,24 @@ export default function SettingsPage() {
                         </div>
                     </CardHeader>
                     <CardContent className="space-y-5">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-4">
                             <div>
                                 <p className="font-medium">Enable Reminders</p>
                                 <p className="text-sm text-muted-foreground">
                                     Get alerts before tenders close
                                 </p>
                             </div>
-                            <Switch checked={closingReminders} onCheckedChange={setClosingReminders} />
+                            <Switch className="shrink-0" checked={closingReminders} onCheckedChange={setClosingReminders} />
                         </div>
 
                         {closingReminders && (
-                            <div className="flex items-center justify-between pl-4 border-l-2 border-emerald-200">
+                            <div className="flex flex-col gap-3 border-l-2 border-emerald-200 pl-4 sm:flex-row sm:items-center sm:justify-between">
                                 <div>
                                     <p className="font-medium">Days Before</p>
                                     <p className="text-sm text-muted-foreground">When to send reminder</p>
                                 </div>
                                 <Select value={reminderDays} onValueChange={setReminderDays}>
-                                    <SelectTrigger className="w-36">
+                                    <SelectTrigger className="w-full sm:w-36">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -176,8 +278,8 @@ export default function SettingsPage() {
                 </Card>
 
                 {/* Save Button */}
-                <div className="flex justify-end pt-4">
-                    <Button onClick={handleSave} disabled={saving} className="bg-emerald-500 hover:bg-emerald-600">
+                <div className="flex justify-end pt-2 sm:pt-4">
+                    <Button onClick={handleSave} disabled={saving} className="w-full bg-emerald-500 hover:bg-emerald-600 sm:w-auto">
                         {saving ? (
                             <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</>
                         ) : saved ? (

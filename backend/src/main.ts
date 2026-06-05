@@ -1,18 +1,16 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
+import { getAllowedOrigins } from './security/env';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
-  // Enable CORS for frontend
+  app.use(helmet());
+
   app.enableCors({
-    origin: [
-      process.env.FRONTEND_URL || 'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:3002',
-      'http://127.0.0.1:3000',
-    ],
+    origin: getAllowedOrigins(),
     credentials: true,
   });
 
@@ -20,6 +18,7 @@ async function bootstrap() {
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
+      forbidNonWhitelisted: true,
       transform: true,
       transformOptions: {
         enableImplicitConversion: true,
@@ -30,7 +29,7 @@ async function bootstrap() {
   // API prefix
   app.setGlobalPrefix('api');
 
-  const port = process.env.PORT || 5000;
+  const port = process.env.PORT || 5001;
   await app.listen(port);
   console.log(`🚀 Backend API running on http://localhost:${port}/api`);
 }

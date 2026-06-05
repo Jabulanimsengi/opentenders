@@ -21,7 +21,7 @@ export function BookmarkButton({ tenderId, className, variant = 'default', isSub
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(true);
 
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
 
     // Check if already bookmarked on mount
     useEffect(() => {
