@@ -1,298 +1,416 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
-import { TypesenseService } from '../typesense/typesense.service';
 import axios from 'axios';
 import * as https from 'https';
 import { subHours, format, differenceInDays } from 'date-fns';
+import { buildTenderSmartSearchCondition } from '../tenders/smart-search';
+import { TypesenseService } from '../typesense';
+import { AlertsService } from '../alerts';
+import {
+  inferTenderCategory,
+  normaliseTenderCategory,
+} from '../tenders/tender-categories';
+import {
+  isActiveTenderLike,
+  normalizeTenderBriefingDate,
+} from '../tenders/tender-date-rules';
+
+const UNKNOWN_ADVERTISED_DATE = new Date(0);
 
 const api = axios.create({
-    httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-    timeout: 30000,
+  httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+  timeout: Number(process.env.ETENDERS_TIMEOUT_MS || 120000),
 });
 
+const SYNC_PAGE_SIZE = Number(process.env.ETENDERS_PAGE_SIZE || 10);
+const SYNC_PAGE_LIMIT = 20;
+const SYNC_PAGE_RETRIES = 3;
+const MAX_MANUAL_PAGE_LIMIT = 10000;
+const MAX_MANUAL_PAGE_SIZE = 100;
+
+interface TenderDateRangeSyncOptions {
+  dateFrom?: string;
+  dateTo?: string;
+  pageLimit?: number;
+  pageSize?: number;
+  notifyNew?: boolean;
+  delayMs?: number;
+  fullRange?: boolean;
+}
+
 interface OCDSRelease {
-    ocid: string;
-    date: string;
-    tender?: {
-        title?: string;
-        description?: string;
-        status?: string;
-        province?: string;
-        tenderPeriod?: { endDate?: string };
-        briefingSession?: {
-            date?: string;
-            venue?: string;
-            compulsory?: boolean;
-        };
-        deliveryAddresses?: { region?: string }[];
-        mainProcurementCategory?: string;
-        contactPerson?: {
-            name?: string;
-            email?: string;
-            telephoneNumber?: string;
-        };
-        value?: {
-            amount?: number;
-            currency?: string;
-        };
-        eligibilityCriteria?: string;
-        specialConditions?: string;
-        submissionMethod?: string[];
+  ocid: string;
+  date: string;
+  tender?: {
+    title?: string;
+    description?: string;
+    status?: string;
+    province?: string;
+    tenderPeriod?: { startDate?: string; endDate?: string };
+    briefingSession?: {
+      date?: string;
+      venue?: string;
+      compulsory?: boolean;
     };
-    buyer?: { name?: string };
-    awards?: Array<{
-        suppliers?: { name: string }[];
-        value?: { amount?: number; currency?: string };
-        date?: string;
-    }>;
+    deliveryAddresses?: { region?: string }[];
+    mainProcurementCategory?: string;
+    contactPerson?: {
+      name?: string;
+      email?: string;
+      telephoneNumber?: string;
+    };
+    value?: {
+      amount?: number;
+      currency?: string;
+    };
+    eligibilityCriteria?: string;
+    specialConditions?: string;
+    submissionMethod?: string[];
+  };
+  buyer?: { name?: string };
+  awards?: Array<{
+    suppliers?: { name: string }[];
+    value?: { amount?: number; currency?: string };
+    date?: string;
+  }>;
 }
 
 @Injectable()
 export class SyncService {
-    private readonly logger = new Logger(SyncService.name);
-    private readonly apiBaseUrl = 'https://ocds-api.etenders.gov.za/api/OCDSReleases';
+  private readonly logger = new Logger(SyncService.name);
+  private readonly apiBaseUrl =
+    'https://ocds-api.etenders.gov.za/api/OCDSReleases';
+  private syncRunning = false;
 
-    constructor(
-        private prisma: PrismaService,
-        private emailService: EmailService,
-        private typesenseService: TypesenseService,
-    ) { }
+  constructor(
+    private prisma: PrismaService,
+    private emailService: EmailService,
+    private alertsService: AlertsService,
+    @Optional() private readonly typesense?: TypesenseService,
+  ) {}
 
-    private generateSlug(title: string, ocid: string): string {
-        // Create slug from title, limited to 80 chars, appended with short ocid suffix
-        const baseSlug = title
-            .toLowerCase()
-            .replace(/[^a-z0-9\s-]/g, '') // Remove special chars
-            .replace(/\s+/g, '-') // Replace spaces with hyphens
-            .replace(/-+/g, '-') // Replace multiple hyphens with single
-            .replace(/^-|-$/g, '') // Trim hyphens from start/end
-            .substring(0, 80);
+  private generateSlug(title: string, ocid: string): string {
+    // Create slug from title, limited to 80 chars, appended with short ocid suffix
+    const baseSlug = title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '') // Remove special chars
+      .replace(/\s+/g, '-') // Replace spaces with hyphens
+      .replace(/-+/g, '-') // Replace multiple hyphens with single
+      .replace(/^-|-$/g, '') // Trim hyphens from start/end
+      .substring(0, 80);
 
-        // Extract last part of ocid for uniqueness (e.g., "ocds-9t57fa-143883" -> "143883")
-        const ocidSuffix = ocid.split('-').pop() || ocid.substring(ocid.length - 6);
+    // Extract last part of ocid for uniqueness (e.g., "ocds-9t57fa-143883" -> "143883")
+    const ocidSuffix = ocid.split('-').pop() || ocid.substring(ocid.length - 6);
 
-        return `${baseSlug}-${ocidSuffix}`;
+    return `${baseSlug}-${ocidSuffix}`;
+  }
+
+  // Pull fresh eTenders records every 30 minutes.
+  @Cron('*/30 * * * *')
+  async syncNewTenders() {
+    if (this.syncRunning) {
+      this.logger.warn('Tender sync is already running; skipping');
+      return;
     }
 
-    // Run every 4 hours
-    @Cron('0 */4 * * *')
-    async syncNewTenders() {
-        this.logger.log('Starting scheduled tender sync...');
-        await this.fetchRecentTenders(24); // Last 24 hours
+    this.syncRunning = true;
+    this.logger.log('Starting scheduled tender sync...');
+    try {
+      await this.fetchRecentTenders(2);
+    } finally {
+      this.syncRunning = false;
     }
+  }
 
-    // Daily at 6 AM - send digest alerts
-    @Cron('0 6 * * *')
-    async sendDailyDigest() {
-        this.logger.log('Sending daily digest alerts...');
-        await this.processAlerts();
-    }
+  // Manual compatibility path; scheduled alert delivery lives in AlertsService.
+  async sendDailyDigest() {
+    this.logger.log('Sending daily digest alerts...');
+    await this.processAlerts();
+  }
 
-    // Daily at 7 AM - send closing reminders
-    @Cron('0 7 * * *')
-    async sendClosingReminders() {
-        this.logger.log('Processing closing reminders...');
-        await this.processClosingReminders();
-    }
+  // Daily at 7 AM - send closing reminders
+  @Cron('0 7 * * *')
+  async sendClosingReminders() {
+    this.logger.log('Processing closing reminders...');
+    await this.processClosingReminders();
+  }
 
-    async fetchRecentTenders(hoursBack: number = 24): Promise<number> {
-        const dateFrom = format(subHours(new Date(), hoursBack), 'yyyy-MM-dd');
-        const dateTo = format(new Date(), 'yyyy-MM-dd');
+  async fetchRecentTenders(hoursBack: number = 24): Promise<number> {
+    const dateFrom = format(subHours(new Date(), hoursBack), 'yyyy-MM-dd');
+    const dateTo = format(new Date(), 'yyyy-MM-dd');
 
-        this.logger.log(`Fetching tenders from ${dateFrom} to ${dateTo}`);
+    return this.fetchTendersByDateRange({
+      dateFrom,
+      dateTo,
+      pageLimit: SYNC_PAGE_LIMIT,
+      pageSize: SYNC_PAGE_SIZE,
+    });
+  }
 
-        let totalIngested = 0;
-        let page = 1;
-        let hasMore = true;
+  async fetchTendersByDateRange({
+    dateFrom = format(subHours(new Date(), 24), 'yyyy-MM-dd'),
+    dateTo = format(new Date(), 'yyyy-MM-dd'),
+    pageLimit,
+    pageSize,
+    notifyNew = true,
+    delayMs = 200,
+    fullRange = false,
+  }: TenderDateRangeSyncOptions = {}): Promise<number> {
+    const defaultPageLimit = fullRange ? MAX_MANUAL_PAGE_LIMIT : SYNC_PAGE_LIMIT;
+    const defaultPageSize = fullRange ? MAX_MANUAL_PAGE_SIZE : SYNC_PAGE_SIZE;
+    const resolvedPageLimit = Math.max(
+      1,
+      Math.min(Number(pageLimit) || defaultPageLimit, MAX_MANUAL_PAGE_LIMIT),
+    );
+    const resolvedPageSize = Math.max(
+      1,
+      Math.min(Number(pageSize) || defaultPageSize, MAX_MANUAL_PAGE_SIZE),
+    );
+    const resolvedDelayMs = Math.max(0, Math.min(Number(delayMs) || 0, 1000));
 
-        while (hasMore) {
-            try {
-                const url = `${this.apiBaseUrl}?PageNumber=${page}&PageSize=50&dateFrom=${dateFrom}&dateTo=${dateTo}`;
-                const response = await api.get(url);
-                const releases: OCDSRelease[] = response.data?.releases || [];
+    this.logger.log(
+      `Fetching tenders from ${dateFrom} to ${dateTo} (pageSize=${resolvedPageSize}, pageLimit=${resolvedPageLimit}, notifyNew=${notifyNew}, delayMs=${resolvedDelayMs})`,
+    );
 
-                if (releases.length === 0) {
-                    hasMore = false;
-                    break;
-                }
+    let totalIngested = 0;
+    let page = 1;
+    let hasMore = true;
 
-                for (const item of releases) {
-                    await this.upsertTender(item);
-                    totalIngested++;
-                }
+    while (hasMore) {
+      try {
+        const releases = await this.fetchOcdsPage(
+          page,
+          dateFrom,
+          dateTo,
+          resolvedPageSize,
+        );
 
-                page++;
-                await this.delay(200); // Rate limiting
-
-                if (page > 20) {
-                    this.logger.warn('Reached page limit, stopping');
-                    hasMore = false;
-                }
-            } catch (error: any) {
-                this.logger.error(`Sync error: ${error.message}`);
-                hasMore = false;
-            }
+        if (releases.length === 0) {
+          hasMore = false;
+          break;
         }
 
-        this.logger.log(`Sync complete: ${totalIngested} tenders processed`);
-        return totalIngested;
-    }
-
-    private async upsertTender(item: OCDSRelease) {
-        const briefing = item.tender?.briefingSession;
-        const contact = item.tender?.contactPerson;
-        const value = item.tender?.value;
-        const title = item.tender?.title || 'Untitled Tender';
-
-        const tender = {
-            ocid: item.ocid,
-            slug: this.generateSlug(title, item.ocid),
-            title,
-            description: item.tender?.description || '',
-            status: item.tender?.status || 'active',
-            publishedDate: item.date ? new Date(item.date) : new Date(),
-            closingDate: item.tender?.tenderPeriod?.endDate ? new Date(item.tender.tenderPeriod.endDate) : null,
-            briefingDate: briefing?.date ? new Date(briefing.date) : null,
-            briefingVenue: briefing?.venue || null,
-            briefingCompulsory: briefing?.compulsory || false,
-            buyerName: item.buyer?.name || 'Unknown Buyer',
-            region: item.tender?.deliveryAddresses?.[0]?.region || 'National',
-            province: item.tender?.province || null,
-            category: item.tender?.mainProcurementCategory || 'General',
-            contactName: contact?.name || null,
-            contactEmail: contact?.email || null,
-            contactPhone: contact?.telephoneNumber || null,
-            estimatedValue: value?.amount || null,
-            currency: value?.currency || 'ZAR',
-            eligibilityCriteria: item.tender?.eligibilityCriteria || null,
-            specialConditions: item.tender?.specialConditions || null,
-            submissionMethod: item.tender?.submissionMethod?.join(', ') || null,
-            rawData: JSON.stringify(item),
-        };
-
-        const result = await this.prisma.tender.upsert({
-            where: { ocid: tender.ocid },
-            update: tender,
-            create: tender,
-        });
-
-        // Index to Typesense
-        await this.typesenseService.indexTender(result);
-    }
-
-    async processAlerts() {
-        // Get all saved searches that haven't been alerted in the last 24 hours
-        const searches = await this.prisma.savedSearch.findMany({
-            where: {
-                OR: [
-                    { lastAlertedAt: null },
-                    { lastAlertedAt: { lt: subHours(new Date(), 24) } },
-                ],
-            },
-            include: {
-                user: true,
-            },
-        });
-
-        this.logger.log(`Processing ${searches.length} saved searches for alerts`);
-
-        for (const search of searches) {
-            try {
-                const criteria = JSON.parse(search.criteria);
-                const matchingTenders = await this.findMatchingTenders(criteria, search.lastAlertedAt);
-
-                if (matchingTenders.length > 0) {
-                    await this.emailService.sendTenderMatchAlert(
-                        search.user.email,
-                        search.user.name || 'User',
-                        search.name,
-                        matchingTenders.map((t: any) => ({
-                            title: t.title,
-                            closingDate: t.closingDate ? format(t.closingDate, 'dd MMM yyyy') : null,
-                            slug: t.slug || t.id,
-                        })),
-                    );
-
-                    // Update last alerted time
-                    await this.prisma.savedSearch.update({
-                        where: { id: search.id },
-                        data: { lastAlertedAt: new Date() },
-                    });
-                }
-            } catch (error: any) {
-                this.logger.error(`Alert processing error for search ${search.id}: ${error.message}`);
-            }
-        }
-    }
-
-    private async findMatchingTenders(criteria: any, since: Date | null) {
-        const where: any = {};
-
-        if (since) {
-            where.createdAt = { gt: since };
-        } else {
-            where.createdAt = { gt: subHours(new Date(), 24) };
+        for (const item of releases) {
+          const ingested = await this.upsertTender(item, notifyNew);
+          if (ingested) totalIngested++;
         }
 
-        if (criteria.q) {
-            where.OR = [
-                { title: { contains: criteria.q } },
-                { description: { contains: criteria.q } },
-            ];
-        }
-        if (criteria.region?.length) {
-            where.region = { in: criteria.region };
-        }
-        if (criteria.category?.length) {
-            where.category = { in: criteria.category };
-        }
-        if (criteria.buyer?.length) {
-            where.buyerName = { in: criteria.buyer };
+        page++;
+        if (resolvedDelayMs > 0) {
+          await this.delay(resolvedDelayMs);
         }
 
-        return this.prisma.tender.findMany({
-            where,
-            take: 10,
-            orderBy: { publishedDate: 'desc' },
-        });
+        if (page > resolvedPageLimit) {
+          this.logger.warn(
+            `Reached page limit (${resolvedPageLimit}), stopping`,
+          );
+          hasMore = false;
+        }
+      } catch (error: any) {
+        this.logger.error(`Sync error: ${error.message}`);
+        hasMore = false;
+      }
     }
 
-    async processClosingReminders() {
-        const today = new Date();
-        const remindDays = [7, 3, 1]; // Send reminders at these intervals
+    this.logger.log(`Sync complete: ${totalIngested} tenders processed`);
+    return totalIngested;
+  }
 
-        for (const days of remindDays) {
-            const targetDate = new Date(today);
-            targetDate.setDate(targetDate.getDate() + days);
+  private async fetchOcdsPage(
+    page: number,
+    dateFrom: string,
+    dateTo: string,
+    pageSize = SYNC_PAGE_SIZE,
+  ): Promise<OCDSRelease[]> {
+    const url = `${this.apiBaseUrl}?PageNumber=${page}&PageSize=${pageSize}&dateFrom=${dateFrom}&dateTo=${dateTo}`;
 
-            const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
-            const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+    for (let attempt = 1; attempt <= SYNC_PAGE_RETRIES; attempt++) {
+      try {
+        const response = await api.get(url);
+        return response.data?.releases || [];
+      } catch (error: any) {
+        const message = error?.message || String(error);
+        const retryable =
+          error?.code === 'ETIMEDOUT' ||
+          error?.code === 'ECONNABORTED' ||
+          error?.code === 'ENOTFOUND' ||
+          error?.code === 'ECONNRESET' ||
+          error?.code === 'ECONNREFUSED' ||
+          error?.code === 'EAI_AGAIN' ||
+          Number(error?.response?.status) >= 500;
 
-            const tenders = await this.prisma.tender.findMany({
-                where: {
-                    closingDate: {
-                        gte: startOfDay,
-                        lte: endOfDay,
-                    },
-                    status: 'active',
-                },
-            });
-
-            this.logger.log(`Found ${tenders.length} tenders closing in ${days} day(s)`);
-
-            // For now, just log - in production, you'd track which users saved these tenders
-            // and send reminders to them
+        if (!retryable || attempt === SYNC_PAGE_RETRIES) {
+          throw error;
         }
+
+        this.logger.warn(
+          `eTenders page ${page} fetch failed (${message}); retrying ${attempt}/${SYNC_PAGE_RETRIES}`,
+        );
+        await this.delay(1000 * attempt);
+      }
     }
 
-    private delay(ms: number) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    return [];
+  }
+
+  private async upsertTender(item: OCDSRelease, notifyNew = true) {
+    const briefing = item.tender?.briefingSession;
+    const contact = item.tender?.contactPerson;
+    const value = item.tender?.value;
+    const title = item.tender?.title || 'Untitled Tender';
+    const sourcePublishedDate = item.tender?.tenderPeriod?.startDate
+      ? new Date(item.tender.tenderPeriod.startDate)
+      : item.date
+        ? new Date(item.date)
+        : null;
+    const sourceClosingDate = item.tender?.tenderPeriod?.endDate
+      ? new Date(item.tender.tenderPeriod.endDate)
+      : null;
+    const closingDate =
+      sourceClosingDate && !Number.isNaN(sourceClosingDate.getTime())
+        ? sourceClosingDate
+        : null;
+
+    if (!sourcePublishedDate || Number.isNaN(sourcePublishedDate.getTime())) {
+      this.logger.warn(
+        `Tender ${item.ocid} has no source advertised date; storing as unavailable`,
+      );
+    }
+    const publishedDate =
+      sourcePublishedDate && !Number.isNaN(sourcePublishedDate.getTime())
+        ? sourcePublishedDate
+        : UNKNOWN_ADVERTISED_DATE;
+
+    const tender = {
+      ocid: item.ocid,
+      slug: this.generateSlug(title, item.ocid),
+      title,
+      description: item.tender?.description || '',
+      status: item.tender?.status || 'active',
+      publishedDate,
+      closingDate,
+      briefingDate: normalizeTenderBriefingDate(
+        briefing?.date ? new Date(briefing.date) : null,
+        publishedDate,
+        closingDate,
+      ),
+      briefingVenue: briefing?.venue || null,
+      briefingCompulsory: briefing?.compulsory || false,
+      buyerName: item.buyer?.name || 'Unknown Buyer',
+      region: item.tender?.deliveryAddresses?.[0]?.region || 'National',
+      province: item.tender?.province || null,
+      category:
+        inferTenderCategory(
+          [title, item.tender?.description, item.buyer?.name]
+            .filter(Boolean)
+            .join(' | '),
+        ) ||
+        normaliseTenderCategory(item.tender?.mainProcurementCategory) ||
+        null,
+      contactName: contact?.name || null,
+      contactEmail: contact?.email || null,
+      contactPhone: contact?.telephoneNumber || null,
+      estimatedValue: value?.amount || null,
+      currency: value?.currency || 'ZAR',
+      eligibilityCriteria: item.tender?.eligibilityCriteria || null,
+      specialConditions: item.tender?.specialConditions || null,
+      submissionMethod: item.tender?.submissionMethod?.join(', ') || null,
+      sourceName: 'eTenders Portal',
+      sourceType: 'national_portal',
+      sourceUrl: this.apiBaseUrl,
+      rawData: JSON.stringify(item),
+    };
+
+    const existing = await this.prisma.tender.findUnique({
+      where: { ocid: tender.ocid },
+      select: { id: true },
+    });
+
+    const result = await this.prisma.tender.upsert({
+      where: { ocid: tender.ocid },
+      update: tender,
+      create: tender,
+    });
+    await this.typesense?.indexTender(result);
+    if (!existing && notifyNew && isActiveTenderLike(result)) {
+      await this.alertsService.notifyNewTender(result);
     }
 
-    // Manual trigger for testing
-    async triggerSync() {
-        return this.fetchRecentTenders(24);
+    return true;
+  }
+
+  async processAlerts() {
+    return this.alertsService.triggerAlertsManually('daily');
+  }
+
+  private async findMatchingTenders(criteria: any, since: Date | null) {
+    const where: any = {};
+
+    if (since) {
+      where.createdAt = { gt: since };
+    } else {
+      where.createdAt = { gt: subHours(new Date(), 24) };
     }
+
+    const searchCondition = buildTenderSmartSearchCondition(criteria.q);
+    if (searchCondition) {
+      where.AND = [...(where.AND ?? []), searchCondition];
+    }
+    if (criteria.region?.length) {
+      where.region = { in: criteria.region };
+    }
+    if (criteria.category?.length) {
+      where.category = { in: criteria.category };
+    }
+    if (criteria.buyer?.length) {
+      where.buyerName = { in: criteria.buyer };
+    }
+
+    return this.prisma.tender.findMany({
+      where,
+      take: 10,
+      orderBy: { publishedDate: 'desc' },
+    });
+  }
+
+  async processClosingReminders() {
+    const today = new Date();
+    const remindDays = [7, 3, 1]; // Send reminders at these intervals
+
+    for (const days of remindDays) {
+      const targetDate = new Date(today);
+      targetDate.setDate(targetDate.getDate() + days);
+
+      const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
+      const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+
+      const tenders = await this.prisma.tender.findMany({
+        where: {
+          closingDate: {
+            gte: startOfDay,
+            lte: endOfDay,
+          },
+          status: 'active',
+        },
+      });
+
+      this.logger.log(
+        `Found ${tenders.length} tenders closing in ${days} day(s)`,
+      );
+
+      // For now, just log - in production, you'd track which users saved these tenders
+      // and send reminders to them
+    }
+  }
+
+  private delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Manual trigger for testing
+  async triggerSync() {
+    return this.fetchRecentTenders(24);
+  }
 }

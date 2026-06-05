@@ -7,12 +7,18 @@ import https from 'https';
 const prisma = new PrismaClient();
 
 const API_BASE = 'https://ocds-api.etenders.gov.za/api';
+const FIRST_SUPPORTED_ADVERTISED_DATE = new Date('2025-01-01T00:00:00.000Z');
 
 const httpsAgent = new https.Agent({
     rejectUnauthorized: false
 });
 
 export const dynamic = 'force-dynamic'; // prevent caching
+
+function isValidAdvertisedDate(date: Date | null): date is Date {
+    if (!date || Number.isNaN(date.getTime())) return false;
+    return date >= FIRST_SUPPORTED_ADVERTISED_DATE && date <= new Date();
+}
 
 async function fetchReleases(page = 1, pageSize = 50, dateFrom?: string, dateTo?: string) {
     try {
@@ -63,6 +69,26 @@ export async function GET() {
                 const ocid = release.ocid;
 
                 if (!ocid) continue;
+                const advertisedDate = tender.tenderPeriod?.startDate
+                    ? new Date(tender.tenderPeriod.startDate)
+                    : release.date
+                        ? new Date(release.date)
+                        : null;
+
+                if (!isValidAdvertisedDate(advertisedDate)) {
+                    console.warn(`Skipping ${ocid}: invalid source advertised date`);
+                    continue;
+                }
+                const closingDate = tender.tenderPeriod?.endDate ? new Date(tender.tenderPeriod.endDate) : null;
+                const validClosingDate =
+                    closingDate && !Number.isNaN(closingDate.getTime())
+                        ? closingDate
+                        : null;
+
+                if (validClosingDate && validClosingDate < advertisedDate) {
+                    console.warn(`Skipping ${ocid}: closing date is before advertised date`);
+                    continue;
+                }
 
                 let buyerName = tender.buyer?.name;
                 if (!buyerName && release.buyer?.name) buyerName = release.buyer.name;
@@ -82,8 +108,8 @@ export async function GET() {
                         title: tender.title || 'Untitled',
                         description: tender.description,
                         status: tender.status,
-                        publishedDate: release.date ? new Date(release.date) : new Date(),
-                        closingDate: tender.tenderPeriod?.endDate ? new Date(tender.tenderPeriod.endDate) : null,
+                        publishedDate: advertisedDate,
+                        closingDate: validClosingDate,
                         briefingDate: tender.briefingSession?.date ? new Date(tender.briefingSession.date) : null,
                         buyerName: buyerName,
                         category: tender.mainProcurementCategory,
@@ -96,8 +122,8 @@ export async function GET() {
                         title: tender.title || 'Untitled',
                         description: tender.description,
                         status: tender.status,
-                        publishedDate: release.date ? new Date(release.date) : new Date(),
-                        closingDate: tender.tenderPeriod?.endDate ? new Date(tender.tenderPeriod.endDate) : null,
+                        publishedDate: advertisedDate,
+                        closingDate: validClosingDate,
                         briefingDate: tender.briefingSession?.date ? new Date(tender.briefingSession.date) : null,
                         buyerName: buyerName,
                         category: tender.mainProcurementCategory,
