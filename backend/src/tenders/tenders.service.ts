@@ -207,6 +207,12 @@ export class TendersService {
       where: {
         OR: [{ id: slugOrId }, { slug: slugOrId }],
       },
+      include: {
+        awards: {
+          orderBy: [{ date: 'desc' }, { supplierName: 'asc' }],
+          take: 20,
+        },
+      },
     });
 
     return tender && hasDisplayableTenderDates(tender)
@@ -252,8 +258,10 @@ export class TendersService {
       this.prisma.tender.count({
         where: { status: 'cancelled', ...validAdvertisedDateWhere },
       }),
-      // Use raw query for Award count since client generation can lag in prod.
-      this.prisma.$queryRaw<any[]>`SELECT COUNT(*)::int as count FROM "Award"`
+      // Use raw query for distinct awarded-tender count since client generation can lag in prod.
+      this.prisma.$queryRaw<
+        any[]
+      >`SELECT COUNT(DISTINCT "tenderId")::int as count FROM "Award"`
         .then((r: any) => Number(r[0].count))
         .catch(() => 0),
     ]);
@@ -373,14 +381,20 @@ export class TendersService {
       scrapedAt: _scrapedAt,
       ...displayTender
     } = tenderWithDates;
+    const displayTenderWithAwards = {
+      ...displayTender,
+      ...(Array.isArray(tenderWithDates.awards)
+        ? { awards: this.sanitizeAwards(tenderWithDates.awards) }
+        : {}),
+    };
 
-    if (accessLevel === 'paid') return displayTender;
+    if (accessLevel === 'paid') return displayTenderWithAwards;
 
     const restricted = {
-      ...displayTender,
+      ...displayTenderWithAwards,
       documentUrls: null,
-      sourceName: displayTender.sourceName,
-      sourceType: displayTender.sourceType,
+      sourceName: displayTenderWithAwards.sourceName,
+      sourceType: displayTenderWithAwards.sourceType,
       sourceUrl: null,
       sourceHash: null,
       rawHtmlHash: null,
@@ -419,6 +433,19 @@ export class TendersService {
       sourceType: tenderWithDates.sourceType,
       sourceUrl: null,
       rawData: null,
+      awards: this.sanitizeAwards(tenderWithDates.awards) || [],
     };
+  }
+
+  private sanitizeAwards(awards?: any[]) {
+    if (!Array.isArray(awards)) return undefined;
+
+    return awards.map((award) => ({
+      id: award.id,
+      supplierName: award.supplierName,
+      amount: award.amount,
+      currency: award.currency,
+      date: award.date,
+    }));
   }
 }

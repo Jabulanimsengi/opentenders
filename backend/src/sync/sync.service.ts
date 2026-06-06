@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import axios from 'axios';
 import * as https from 'https';
-import { subHours, format, differenceInDays } from 'date-fns';
+import { subDays, subHours, format } from 'date-fns';
 import { buildTenderSmartSearchCondition } from '../tenders/smart-search';
 import { TypesenseService } from '../typesense';
 import { AlertsService } from '../alerts';
@@ -29,6 +29,15 @@ const SYNC_PAGE_LIMIT = 20;
 const SYNC_PAGE_RETRIES = 3;
 const MAX_MANUAL_PAGE_LIMIT = 10000;
 const MAX_MANUAL_PAGE_SIZE = 100;
+const DEFAULT_AWARD_REFRESH_DAYS = Number(
+  process.env.ETENDERS_AWARD_REFRESH_DAYS || 180,
+);
+const DEFAULT_AWARD_REFRESH_LIMIT = Number(
+  process.env.ETENDERS_AWARD_REFRESH_LIMIT || 500,
+);
+const DEFAULT_AWARD_REFRESH_DELAY_MS = Number(
+  process.env.ETENDERS_AWARD_REFRESH_DELAY_MS || 100,
+);
 
 interface TenderDateRangeSyncOptions {
   dateFrom?: string;
@@ -39,6 +48,19 @@ interface TenderDateRangeSyncOptions {
   delayMs?: number;
   fullRange?: boolean;
 }
+
+interface AwardRefreshOptions {
+  daysBack?: number;
+  limit?: number;
+  delayMs?: number;
+}
+
+type AwardSyncResult = {
+  saved: number;
+  deleted: number;
+  activeSupplierCount: number;
+  sourceAwardCount: number;
+};
 
 interface OCDSRelease {
   ocid: string;
@@ -71,6 +93,10 @@ interface OCDSRelease {
   };
   buyer?: { name?: string };
   awards?: Array<{
+    id?: string;
+    title?: string;
+    status?: string;
+    description?: string;
     suppliers?: { name: string }[];
     value?: { amount?: number; currency?: string };
     date?: string;
@@ -83,6 +109,7 @@ export class SyncService {
   private readonly apiBaseUrl =
     'https://ocds-api.etenders.gov.za/api/OCDSReleases';
   private syncRunning = false;
+  private awardRefreshRunning = false;
 
   constructor(
     private prisma: PrismaService,
@@ -121,6 +148,27 @@ export class SyncService {
       await this.fetchRecentTenders(2);
     } finally {
       this.syncRunning = false;
+    }
+  }
+
+  // Award data can be added to old eTenders releases after the tender closes,
+  // so date-range sync alone will miss winners unless closed tenders are revisited.
+  @Cron('15 2 * * *')
+  async refreshAwardDataCron() {
+    if (this.awardRefreshRunning) {
+      this.logger.warn('Award refresh is already running; skipping');
+      return;
+    }
+
+    this.awardRefreshRunning = true;
+    this.logger.log('Starting scheduled award refresh...');
+    try {
+      const summary = await this.refreshRecentAwards();
+      this.logger.log(
+        `Award refresh complete: refreshed=${summary.refreshed}, withAwards=${summary.withAwards}, saved=${summary.awardsSaved}, deleted=${summary.awardsDeleted}, failed=${summary.failed}`,
+      );
+    } finally {
+      this.awardRefreshRunning = false;
     }
   }
 
@@ -196,7 +244,7 @@ export class SyncService {
 
         for (const item of releases) {
           const ingested = await this.upsertTender(item, notifyNew);
-          if (ingested) totalIngested++;
+          if (ingested.processed) totalIngested++;
         }
 
         page++;
@@ -257,7 +305,110 @@ export class SyncService {
     return [];
   }
 
-  private async upsertTender(item: OCDSRelease, notifyNew = true) {
+  async refreshRecentAwards({
+    daysBack = DEFAULT_AWARD_REFRESH_DAYS,
+    limit = DEFAULT_AWARD_REFRESH_LIMIT,
+    delayMs = DEFAULT_AWARD_REFRESH_DELAY_MS,
+  }: AwardRefreshOptions = {}) {
+    const now = new Date();
+    const since = subDays(now, Math.max(1, Number(daysBack) || 1));
+    const take = Math.max(1, Math.min(Number(limit) || 1, 5000));
+    const pauseMs = Math.max(0, Math.min(Number(delayMs) || 0, 1000));
+    const candidates = await this.prisma.tender.findMany({
+      where: {
+        closingDate: { lt: now, gte: since },
+        OR: [
+          { sourceName: 'eTenders Portal' },
+          { ocid: { startsWith: 'ocds-9t57fa' } },
+        ],
+      },
+      orderBy: { closingDate: 'desc' },
+      take,
+      select: {
+        id: true,
+        ocid: true,
+      },
+    });
+
+    const summary = {
+      scanned: candidates.length,
+      refreshed: 0,
+      withAwards: 0,
+      awardsSaved: 0,
+      awardsDeleted: 0,
+      failed: 0,
+    };
+
+    for (const candidate of candidates) {
+      const release = await this.fetchOcdsReleaseByOcid(candidate.ocid);
+      if (!release) {
+        summary.failed++;
+        continue;
+      }
+
+      const result = await this.upsertTender(release, false, true);
+      summary.refreshed++;
+      summary.awardsSaved += result.awards.saved;
+      summary.awardsDeleted += result.awards.deleted;
+      if (result.awards.activeSupplierCount > 0) summary.withAwards++;
+
+      if (pauseMs > 0) {
+        await this.delay(pauseMs);
+      }
+    }
+
+    return summary;
+  }
+
+  private async fetchOcdsReleaseByOcid(
+    ocid: string,
+  ): Promise<OCDSRelease | null> {
+    const url = `${this.apiBaseUrl}/release/${encodeURIComponent(ocid)}`;
+
+    for (let attempt = 1; attempt <= SYNC_PAGE_RETRIES; attempt++) {
+      try {
+        const response = await api.get(url);
+        return response.data || null;
+      } catch (error: any) {
+        const status = Number(error?.response?.status);
+        if (status === 404) return null;
+
+        const message = error?.message || String(error);
+        const retryable =
+          error?.code === 'ETIMEDOUT' ||
+          error?.code === 'ECONNABORTED' ||
+          error?.code === 'ENOTFOUND' ||
+          error?.code === 'ECONNRESET' ||
+          error?.code === 'ECONNREFUSED' ||
+          error?.code === 'EAI_AGAIN' ||
+          status >= 500;
+
+        if (!retryable || attempt === SYNC_PAGE_RETRIES) {
+          this.logger.warn(
+            `Failed to fetch eTenders release ${ocid}: ${message}`,
+          );
+          return null;
+        }
+
+        this.logger.warn(
+          `eTenders release ${ocid} fetch failed (${message}); retrying ${attempt}/${SYNC_PAGE_RETRIES}`,
+        );
+        await this.delay(1000 * attempt);
+      }
+    }
+
+    return null;
+  }
+
+  private async upsertTender(
+    item: OCDSRelease,
+    notifyNew = true,
+    replaceAwards = false,
+  ): Promise<{
+    processed: boolean;
+    tenderId: string;
+    awards: AwardSyncResult;
+  }> {
     const briefing = item.tender?.briefingSession;
     const contact = item.tender?.contactPerson;
     const value = item.tender?.value;
@@ -321,7 +472,7 @@ export class SyncService {
       submissionMethod: item.tender?.submissionMethod?.join(', ') || null,
       sourceName: 'eTenders Portal',
       sourceType: 'national_portal',
-      sourceUrl: this.apiBaseUrl,
+      sourceUrl: `${this.apiBaseUrl}/release/${encodeURIComponent(item.ocid)}`,
       rawData: JSON.stringify(item),
     };
 
@@ -335,22 +486,37 @@ export class SyncService {
       update: tender,
       create: tender,
     });
-    await this.upsertAwards(result.id, item.awards);
+    const awardSync = await this.upsertAwards(result.id, item.awards, {
+      replaceExisting: replaceAwards,
+    });
     await this.typesense?.indexTender(result);
     if (!existing && notifyNew && isActiveTenderLike(result)) {
       await this.alertsService.notifyNewTender(result);
     }
 
-    return true;
+    return { processed: true, tenderId: result.id, awards: awardSync };
   }
 
-  private async upsertAwards(tenderId: string, awards?: OCDSRelease['awards']) {
-    if (!awards?.length) return 0;
+  private async upsertAwards(
+    tenderId: string,
+    awards?: OCDSRelease['awards'],
+    options: { replaceExisting?: boolean } = {},
+  ): Promise<AwardSyncResult> {
+    if (!awards) {
+      return {
+        saved: 0,
+        deleted: 0,
+        activeSupplierCount: 0,
+        sourceAwardCount: 0,
+      };
+    }
 
     let saved = 0;
     const seenSuppliers = new Set<string>();
 
     for (const award of awards) {
+      if (!this.isActiveAward(award)) continue;
+
       const date = this.parseOptionalDate(award.date);
       const amount =
         typeof award.value?.amount === 'number' &&
@@ -391,7 +557,32 @@ export class SyncService {
       }
     }
 
-    return saved;
+    let deleted = 0;
+    if (options.replaceExisting) {
+      const supplierNames = [...seenSuppliers];
+      const deleteResult = await this.prisma.award.deleteMany({
+        where: {
+          tenderId,
+          ...(supplierNames.length > 0
+            ? { supplierName: { notIn: supplierNames } }
+            : {}),
+        },
+      });
+      deleted = deleteResult.count;
+    }
+
+    return {
+      saved,
+      deleted,
+      activeSupplierCount: seenSuppliers.size,
+      sourceAwardCount: awards.length,
+    };
+  }
+
+  private isActiveAward(award: NonNullable<OCDSRelease['awards']>[number]) {
+    const status = award.status?.trim().toLowerCase();
+    if (!status) return true;
+    return ['active', 'complete', 'successful', 'awarded'].includes(status);
   }
 
   private parseOptionalDate(value?: string) {

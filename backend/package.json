@@ -27,6 +27,7 @@
     "tenders:reclassify-categories": "ts-node scripts/reclassify-tender-categories.ts",
     "tenders:audit-categories": "ts-node scripts/audit-tender-categories.ts",
     "tenders:backfill-awards": "ts-node scripts/backfill-awards.ts",
+    "tenders:refresh-awards": "ts-node scripts/refresh-awards.ts",
     "admin:ensure": "ts-node scripts/ensure-admin-user.ts"
   },
   "dependencies": {

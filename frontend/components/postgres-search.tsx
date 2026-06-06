@@ -62,6 +62,8 @@ function TenderCard({
     ? new Date(tender.publishedDate)
     : null;
   const tenderStatus = (tender.status || "active").toLowerCase();
+  const awards = tender.awards || [];
+  const isAwarded = awards.length > 0;
   const isCancelled = tenderStatus === "cancelled";
   const isClosed = !isCancelled && closingDate ? isPast(closingDate) : false;
   const daysLeft =
@@ -72,9 +74,11 @@ function TenderCard({
   const isNewTender = isNewlyAdvertisedTender(publishedDate);
   const statusLabel = isCancelled
     ? "Cancelled"
-    : isClosed
-      ? "Closed"
-      : "Active";
+    : isAwarded
+      ? "Awarded"
+      : isClosed
+        ? "Closed"
+        : "Active";
   const advertisedDateText = formatAdvertisedDate(publishedDate);
   const advertisedSource =
     tender.sourceName ||
@@ -105,11 +109,13 @@ function TenderCard({
         <Card
           className={cn(
             "overflow-hidden rounded-lg border-l-[3px] py-0 transition-all hover:shadow-md cursor-pointer sm:border-l-4",
-            isCancelled || isClosed
-              ? "border-l-slate-300 opacity-75"
-              : isClosingSoon
-                ? "border-l-amber-500"
-                : "border-l-emerald-500",
+            isAwarded
+              ? "border-l-amber-500"
+              : isCancelled || isClosed
+                ? "border-l-slate-300 opacity-75"
+                : isClosingSoon
+                  ? "border-l-amber-500"
+                  : "border-l-emerald-500",
             isExpanded && "rounded-b-none",
           )}
         >
@@ -126,8 +132,11 @@ function TenderCard({
                     variant={isClosed || isCancelled ? "secondary" : "default"}
                     className={cn(
                       "h-5 rounded px-1.5 text-[10px] leading-none sm:text-xs",
+                      isAwarded &&
+                        "border border-amber-200 bg-amber-100 text-amber-800 hover:bg-amber-100",
                       !isClosed &&
                         !isCancelled &&
+                        !isAwarded &&
                         "bg-emerald-500 hover:bg-emerald-600",
                       isCancelled && "bg-slate-200 text-slate-600",
                     )}
@@ -203,6 +212,20 @@ function TenderCard({
                   </div>
                 )}
 
+                {isAwarded && (
+                  <div className="mt-2 flex max-w-2xl flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-tight text-amber-900 sm:text-xs">
+                    <Trophy className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                    <span className="font-medium">
+                      Awarded to {formatAwardSuppliers(awards)}
+                    </span>
+                    {formatAwardAmount(awards[0]) && (
+                      <span className="text-amber-700">
+                        {formatAwardAmount(awards[0])}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* Dates Row */}
                 {(publishedDate || closingDate) && (
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-slate-100 pt-1.5 text-[10px] leading-tight text-slate-400 sm:mt-2 sm:gap-x-4 sm:pt-2 sm:text-xs">
@@ -224,7 +247,12 @@ function TenderCard({
 
               <div className="flex shrink-0 items-center justify-between gap-2 sm:flex-col sm:items-end">
                 <div className="flex min-w-0 items-center gap-2">
-                  {closingDate && (
+                  {isAwarded ? (
+                    <div className="flex items-center gap-1 whitespace-nowrap text-xs font-medium text-amber-700 sm:text-sm">
+                      <Trophy className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      Awarded
+                    </div>
+                  ) : closingDate ? (
                     <div
                       className={cn(
                         "flex items-center gap-1 whitespace-nowrap text-xs font-medium sm:text-sm",
@@ -244,7 +272,7 @@ function TenderCard({
                             ? "1 day left"
                             : `${daysLeft} days left`}
                     </div>
-                  )}
+                  ) : null}
                   {isLoggedIn && (
                     <div data-bookmark-button>
                       <BookmarkButton
@@ -396,6 +424,29 @@ function labelSourceType(sourceType: string) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function formatAwardSuppliers(awards: NonNullable<Tender["awards"]>) {
+  const names = awards
+    .map((award) => award.supplierName)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (names.length === 0) return "successful supplier";
+
+  const suffix =
+    awards.length > names.length ? ` +${awards.length - names.length}` : "";
+  return `${names.join(", ")}${suffix}`;
+}
+
+function formatAwardAmount(award?: NonNullable<Tender["awards"]>[number]) {
+  if (!award || typeof award.amount !== "number" || award.amount <= 0) {
+    return null;
+  }
+
+  return `${award.currency || "ZAR"} ${award.amount.toLocaleString("en-ZA", {
+    maximumFractionDigits: 0,
+  })}`;
 }
 
 function getHighlightTerms(query: string) {

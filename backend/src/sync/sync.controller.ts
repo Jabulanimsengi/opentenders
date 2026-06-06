@@ -44,4 +44,19 @@ export class SyncController {
     await this.syncService.processAlerts();
     return { success: true };
   }
+
+  @Post('awards')
+  async refreshAwards(
+    @Query('daysBack') daysBack?: string,
+    @Query('limit') limit?: string,
+    @Query('delayMs') delayMs?: string,
+  ) {
+    const summary = await this.syncService.refreshRecentAwards({
+      daysBack: daysBack ? Number(daysBack) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      delayMs: delayMs ? Number(delayMs) : undefined,
+    });
+
+    return { success: true, ...summary };
+  }
 }

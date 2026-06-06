@@ -16,6 +16,7 @@ import {
   DollarSign,
   Briefcase,
   Lock,
+  Trophy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatClosingDate } from "@/lib/date-utils";
@@ -143,6 +144,16 @@ function labelSourceType(sourceType?: string | null) {
     .join(" ");
 }
 
+function formatAwardAmount(award?: NonNullable<Tender["awards"]>[number]) {
+  if (!award || typeof award.amount !== "number" || award.amount <= 0) {
+    return null;
+  }
+
+  return `${award.currency || "ZAR"} ${award.amount.toLocaleString("en-ZA", {
+    maximumFractionDigits: 0,
+  })}`;
+}
+
 // Dynamic metadata for SEO
 export async function generateMetadata({
   params,
@@ -225,6 +236,8 @@ export default async function TenderPage(props: {
   const isClosed = tender.closingDate
     ? isPast(new Date(tender.closingDate))
     : false;
+  const awards = tender.awards || [];
+  const isAwarded = awards.length > 0;
   const isClosingSoon =
     tender.closingDate &&
     !isClosed &&
@@ -343,19 +356,27 @@ export default async function TenderPage(props: {
             <Badge
               className={cn(
                 "shrink-0 px-2.5 py-1 text-xs sm:px-3 sm:text-sm",
-                isClosed && "bg-red-500 hover:bg-red-600 text-white border-0",
+                isAwarded &&
+                  "bg-amber-500 hover:bg-amber-600 text-white border-0",
+                isClosed &&
+                  !isAwarded &&
+                  "bg-red-500 hover:bg-red-600 text-white border-0",
                 isClosingSoon &&
+                  !isAwarded &&
                   "bg-orange-500 hover:bg-orange-600 text-white border-0",
                 !isClosed &&
+                  !isAwarded &&
                   !isClosingSoon &&
                   "bg-emerald-500 text-white border-0",
               )}
             >
-              {isClosed
-                ? "Closed"
-                : isClosingSoon
-                  ? "Closing Soon"
-                  : tender.status || "Active"}
+              {isAwarded
+                ? "Awarded"
+                : isClosed
+                  ? "Closed"
+                  : isClosingSoon
+                    ? "Closing Soon"
+                    : tender.status || "Active"}
             </Badge>
           </div>
 
@@ -393,6 +414,35 @@ export default async function TenderPage(props: {
         </div>
       </div>
 
+      {isAwarded && (
+        <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm sm:mb-8 sm:p-5">
+          <div className="mb-3 flex items-center gap-2 text-amber-900">
+            <Trophy className="h-5 w-5 text-amber-600" />
+            <h2 className="text-base font-semibold sm:text-lg">Tender Award</h2>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {awards.map((award) => (
+              <div
+                key={award.id || award.supplierName}
+                className="rounded-md border border-amber-200 bg-white px-3 py-2"
+              >
+                <p className="text-xs font-medium uppercase text-amber-700">
+                  Successful bidder
+                </p>
+                <p className="mt-1 break-words text-sm font-semibold text-slate-900 sm:text-base">
+                  {award.supplierName || "Supplier name unavailable"}
+                </p>
+                {formatAwardAmount(award) && (
+                  <p className="mt-1 text-sm text-slate-600">
+                    {formatAwardAmount(award)}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {!isLoggedIn && (
         <div className="space-y-5">
           <div className="overflow-hidden rounded-lg border bg-white shadow-sm sm:rounded-xl">
@@ -415,9 +465,7 @@ export default async function TenderPage(props: {
                       </p>
                     )}
                     {tender.category && (
-                      <p className="text-muted-foreground">
-                        {tender.category}
-                      </p>
+                      <p className="text-muted-foreground">{tender.category}</p>
                     )}
                   </CardContent>
                 </Card>
@@ -460,13 +508,17 @@ export default async function TenderPage(props: {
                   <CardContent className="space-y-1 text-sm">
                     {tender.tenderNumber && (
                       <p>
-                        <span className="text-muted-foreground">Tender No:</span>{" "}
+                        <span className="text-muted-foreground">
+                          Tender No:
+                        </span>{" "}
                         {tender.tenderNumber}
                       </p>
                     )}
                     {displayReference && (
                       <p>
-                        <span className="text-muted-foreground">Reference:</span>{" "}
+                        <span className="text-muted-foreground">
+                          Reference:
+                        </span>{" "}
                         {displayReference}
                       </p>
                     )}
@@ -566,339 +618,344 @@ export default async function TenderPage(props: {
       )}
 
       {isLoggedIn && (
-      <div className="overflow-hidden rounded-lg border bg-white shadow-sm sm:rounded-xl">
-        <div className="p-4 sm:p-6">
-          {/* Value Section */}
-          {valueAmount !== null && valueAmount > 0 && (
-            <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-3 sm:mb-6 sm:p-4">
-              <div className="flex flex-wrap items-center gap-2 text-green-700">
-                <DollarSign className="h-5 w-5 shrink-0" />
-                <span className="font-semibold">Estimated Value:</span>
-                <span className="text-lg font-bold sm:text-xl">
-                  {value?.currency || "ZAR"} {valueAmount.toLocaleString()}
-                </span>
+        <div className="overflow-hidden rounded-lg border bg-white shadow-sm sm:rounded-xl">
+          <div className="p-4 sm:p-6">
+            {/* Value Section */}
+            {valueAmount !== null && valueAmount > 0 && (
+              <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-3 sm:mb-6 sm:p-4">
+                <div className="flex flex-wrap items-center gap-2 text-green-700">
+                  <DollarSign className="h-5 w-5 shrink-0" />
+                  <span className="font-semibold">Estimated Value:</span>
+                  <span className="text-lg font-bold sm:text-xl">
+                    {value?.currency || "ZAR"} {valueAmount.toLocaleString()}
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Key Info Grid */}
-          <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6 lg:grid-cols-3">
-            {/* Buyer */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                  <Building2 className="w-4 h-4" /> Buyer / Department
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="font-medium">{tender.buyerName || "Unknown"}</p>
-                {(province || tender.region) && (
-                  <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                    <MapPin className="w-3 h-3" />
-                    {province || tender.region}
-                  </p>
-                )}
-                {tender.category && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {tender.category}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Key Dates */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                  <Calendar className="w-4 h-4" /> Key Dates
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1 text-sm">
-                <p>
-                  <span className="text-muted-foreground">Advertised:</span>{" "}
-                  {formatAdvertisedDate(tender.publishedDate)}
-                </p>
-                {tender.closingDate && (
-                  <p>
-                    <span className="text-muted-foreground">Closing:</span>{" "}
-                    {format(new Date(tender.closingDate), "dd MMM yyyy, HH:mm")}
-                  </p>
-                )}
-                {briefingDate && (
-                  <p>
-                    <span className="text-muted-foreground">Briefing:</span>{" "}
-                    {format(new Date(briefingDate), "dd MMM yyyy, HH:mm")}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Contact Person */}
-            {isSubscribed &&
-              (tender.sourceName ||
-              tender.sourceUrl ||
-              tender.tenderNumber ||
-                tender.referenceNumber) && (
+            {/* Key Info Grid */}
+            <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6 lg:grid-cols-3">
+              {/* Buyer */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                    <FileText className="w-4 h-4" /> Source & Reference
+                    <Building2 className="w-4 h-4" /> Buyer / Department
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-1 text-sm">
-                  {tender.tenderNumber && (
-                    <p>
-                      <span className="text-muted-foreground">Tender No:</span>{" "}
-                      {tender.tenderNumber}
+                <CardContent>
+                  <p className="font-medium">{tender.buyerName || "Unknown"}</p>
+                  {(province || tender.region) && (
+                    <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+                      <MapPin className="w-3 h-3" />
+                      {province || tender.region}
                     </p>
                   )}
-                  {tender.referenceNumber &&
-                    tender.referenceNumber !== tender.tenderNumber && (
-                      <p>
-                        <span className="text-muted-foreground">
-                          Reference:
-                        </span>{" "}
-                        {tender.referenceNumber}
-                      </p>
-                    )}
-                  {tender.sourceName && (
-                    <p>
-                      <span className="text-muted-foreground">Source:</span>{" "}
-                      {tender.sourceName}
-                    </p>
-                  )}
-                  {tender.sourceUrl && (
-                    <p>
-                      <a
-                        href={tender.sourceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-emerald-600 hover:underline"
-                      >
-                        Open original source
-                      </a>
+                  {tender.category && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {tender.category}
                     </p>
                   )}
                 </CardContent>
               </Card>
-            )}
 
-            {resolvedContact && (
+              {/* Key Dates */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                    <User className="w-4 h-4" /> Contact Person
+                    <Calendar className="w-4 h-4" /> Key Dates
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-1 text-sm">
-                  {resolvedContact.name && (
-                    <p className="font-medium">{resolvedContact.name}</p>
-                  )}
-                  {resolvedContact.email && (
-                    <p className="flex items-center gap-1">
-                      <Mail className="w-3 h-3 text-muted-foreground" />
-                      <a
-                        href={`mailto:${resolvedContact.email}`}
-                        className="text-emerald-600 hover:underline"
-                      >
-                        {resolvedContact.email}
-                      </a>
-                    </p>
-                  )}
-                  {resolvedContact.telephoneNumber && (
-                    <p className="flex items-center gap-1">
-                      <Phone className="w-3 h-3 text-muted-foreground" />
-                      <a
-                        href={`tel:${resolvedContact.telephoneNumber}`}
-                        className="text-emerald-600 hover:underline"
-                      >
-                        {resolvedContact.telephoneNumber}
-                      </a>
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Briefing Session Details */}
-          {briefingSession &&
-            (briefingSession.venue || briefingSession.compulsory) && (
-              <div className="mb-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
-                <h3 className="text-sm font-semibold text-amber-800 mb-2 flex items-center gap-2">
-                  <Calendar className="w-4 h-4" /> Briefing Session
-                </h3>
-                <div className="text-sm text-amber-700 space-y-1">
-                  {briefingSession.compulsory && (
-                    <p className="flex items-center gap-1">
-                      <AlertTriangle className="w-4 h-4 text-amber-600" />
-                      <strong>Compulsory attendance required</strong>
-                    </p>
-                  )}
-                  {briefingSession.venue && (
+                  <p>
+                    <span className="text-muted-foreground">Advertised:</span>{" "}
+                    {formatAdvertisedDate(tender.publishedDate)}
+                  </p>
+                  {tender.closingDate && (
                     <p>
-                      <span className="font-medium">Venue:</span>{" "}
-                      {briefingSession.venue}
-                    </p>
-                  )}
-                  {briefingSession.date && (
-                    <p>
-                      <span className="font-medium">Date:</span>{" "}
+                      <span className="text-muted-foreground">Closing:</span>{" "}
                       {format(
-                        new Date(briefingSession.date),
+                        new Date(tender.closingDate),
                         "dd MMM yyyy, HH:mm",
                       )}
                     </p>
                   )}
+                  {briefingDate && (
+                    <p>
+                      <span className="text-muted-foreground">Briefing:</span>{" "}
+                      {format(new Date(briefingDate), "dd MMM yyyy, HH:mm")}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Contact Person */}
+              {isSubscribed &&
+                (tender.sourceName ||
+                  tender.sourceUrl ||
+                  tender.tenderNumber ||
+                  tender.referenceNumber) && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                        <FileText className="w-4 h-4" /> Source & Reference
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-1 text-sm">
+                      {tender.tenderNumber && (
+                        <p>
+                          <span className="text-muted-foreground">
+                            Tender No:
+                          </span>{" "}
+                          {tender.tenderNumber}
+                        </p>
+                      )}
+                      {tender.referenceNumber &&
+                        tender.referenceNumber !== tender.tenderNumber && (
+                          <p>
+                            <span className="text-muted-foreground">
+                              Reference:
+                            </span>{" "}
+                            {tender.referenceNumber}
+                          </p>
+                        )}
+                      {tender.sourceName && (
+                        <p>
+                          <span className="text-muted-foreground">Source:</span>{" "}
+                          {tender.sourceName}
+                        </p>
+                      )}
+                      {tender.sourceUrl && (
+                        <p>
+                          <a
+                            href={tender.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-600 hover:underline"
+                          >
+                            Open original source
+                          </a>
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+              {resolvedContact && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                      <User className="w-4 h-4" /> Contact Person
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-1 text-sm">
+                    {resolvedContact.name && (
+                      <p className="font-medium">{resolvedContact.name}</p>
+                    )}
+                    {resolvedContact.email && (
+                      <p className="flex items-center gap-1">
+                        <Mail className="w-3 h-3 text-muted-foreground" />
+                        <a
+                          href={`mailto:${resolvedContact.email}`}
+                          className="text-emerald-600 hover:underline"
+                        >
+                          {resolvedContact.email}
+                        </a>
+                      </p>
+                    )}
+                    {resolvedContact.telephoneNumber && (
+                      <p className="flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-muted-foreground" />
+                        <a
+                          href={`tel:${resolvedContact.telephoneNumber}`}
+                          className="text-emerald-600 hover:underline"
+                        >
+                          {resolvedContact.telephoneNumber}
+                        </a>
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Briefing Session Details */}
+            {briefingSession &&
+              (briefingSession.venue || briefingSession.compulsory) && (
+                <div className="mb-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                  <h3 className="text-sm font-semibold text-amber-800 mb-2 flex items-center gap-2">
+                    <Calendar className="w-4 h-4" /> Briefing Session
+                  </h3>
+                  <div className="text-sm text-amber-700 space-y-1">
+                    {briefingSession.compulsory && (
+                      <p className="flex items-center gap-1">
+                        <AlertTriangle className="w-4 h-4 text-amber-600" />
+                        <strong>Compulsory attendance required</strong>
+                      </p>
+                    )}
+                    {briefingSession.venue && (
+                      <p>
+                        <span className="font-medium">Venue:</span>{" "}
+                        {briefingSession.venue}
+                      </p>
+                    )}
+                    {briefingSession.date && (
+                      <p>
+                        <span className="font-medium">Date:</span>{" "}
+                        {format(
+                          new Date(briefingSession.date),
+                          "dd MMM yyyy, HH:mm",
+                        )}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+            {/* Description */}
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                <FileText className="w-4 h-4" /> Description
+              </h3>
+              <div className="prose max-w-none text-gray-700 whitespace-pre-line bg-gray-50 p-4 rounded-lg text-sm leading-relaxed">
+                {tender.description}
+              </div>
+            </div>
+
+            {/* Special Conditions */}
+            {specialConditions && (
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" /> Special Conditions
+                </h3>
+                <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg text-sm text-amber-800 whitespace-pre-line">
+                  {specialConditions}
                 </div>
               </div>
             )}
 
-          {/* Description */}
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-              <FileText className="w-4 h-4" /> Description
-            </h3>
-            <div className="prose max-w-none text-gray-700 whitespace-pre-line bg-gray-50 p-4 rounded-lg text-sm leading-relaxed">
-              {tender.description}
-            </div>
-          </div>
-
-          {/* Special Conditions */}
-          {specialConditions && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" /> Special Conditions
-              </h3>
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg text-sm text-amber-800 whitespace-pre-line">
-                {specialConditions}
-              </div>
-            </div>
-          )}
-
-          {/* Delivery Location */}
-          {deliveryLocation && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <MapPin className="w-4 h-4" /> Delivery Location
-              </h3>
-              <div className="bg-gray-50 p-4 rounded-lg text-sm">
-                {deliveryLocation}
-              </div>
-            </div>
-          )}
-
-          {/* Documents */}
-          {documents.length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                <FileText className="w-4 h-4" /> Documents & Links
-              </h3>
-
-              {isSubscribed ? (
-                <div className="grid gap-2">
-                  {documents.map((doc, i: number) => (
-                    <a
-                      key={i}
-                      href={doc.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border transition-colors group"
-                    >
-                      <div className="flex items-center gap-3 group">
-                        <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center text-emerald-600">
-                          <FileText className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900 group-hover:text-emerald-600">
-                            {doc.title || doc.documentType || "Document"}
-                          </p>
-                          {doc.format && (
-                            <p className="text-xs text-muted-foreground uppercase">
-                              {doc.format}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <span className="text-emerald-600 text-sm">
-                        Download →
-                      </span>
-                    </a>
-                  ))}
+            {/* Delivery Location */}
+            {deliveryLocation && (
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                  <MapPin className="w-4 h-4" /> Delivery Location
+                </h3>
+                <div className="bg-gray-50 p-4 rounded-lg text-sm">
+                  {deliveryLocation}
                 </div>
-              ) : (
-                <div className="relative overflow-hidden rounded-lg border border-slate-200">
-                  <div className="grid gap-2 p-3 opacity-40 blur-[2px] pointer-events-none select-none">
-                    {[1, 2].map((_, i) => (
-                      <div
+              </div>
+            )}
+
+            {/* Documents */}
+            {documents.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <FileText className="w-4 h-4" /> Documents & Links
+                </h3>
+
+                {isSubscribed ? (
+                  <div className="grid gap-2">
+                    {documents.map((doc, i: number) => (
+                      <a
                         key={i}
-                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border"
+                        href={doc.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border transition-colors group"
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gray-200 rounded-lg" />
-                          <div className="space-y-2">
-                            <div className="h-4 w-32 bg-gray-200 rounded" />
-                            <div className="h-3 w-12 bg-gray-200 rounded" />
+                        <div className="flex items-center gap-3 group">
+                          <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center text-emerald-600">
+                            <FileText className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900 group-hover:text-emerald-600">
+                              {doc.title || doc.documentType || "Document"}
+                            </p>
+                            {doc.format && (
+                              <p className="text-xs text-muted-foreground uppercase">
+                                {doc.format}
+                              </p>
+                            )}
                           </div>
                         </div>
-                      </div>
+                        <span className="text-emerald-600 text-sm">
+                          Download →
+                        </span>
+                      </a>
                     ))}
                   </div>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50/50 backdrop-blur-[1px]">
-                    <div className="bg-white p-4 rounded-xl shadow-lg border border-slate-100 text-center max-w-sm mx-4">
-                      <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                        <Lock className="w-5 h-5 text-amber-600" />
+                ) : (
+                  <div className="relative overflow-hidden rounded-lg border border-slate-200">
+                    <div className="grid gap-2 p-3 opacity-40 blur-[2px] pointer-events-none select-none">
+                      {[1, 2].map((_, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-gray-200 rounded-lg" />
+                            <div className="space-y-2">
+                              <div className="h-4 w-32 bg-gray-200 rounded" />
+                              <div className="h-3 w-12 bg-gray-200 rounded" />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50/50 backdrop-blur-[1px]">
+                      <div className="bg-white p-4 rounded-xl shadow-lg border border-slate-100 text-center max-w-sm mx-4">
+                        <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                          <Lock className="w-5 h-5 text-amber-600" />
+                        </div>
+                        <h4 className="font-semibold text-slate-900 mb-1">
+                          Documents Locked
+                        </h4>
+                        <p className="text-sm text-slate-500 mb-3">
+                          Upgrade to a paid plan to download unlimited tender
+                          documents.
+                        </p>
+                        <Link href="/pricing">
+                          <Badge className="bg-amber-500 hover:bg-amber-600 text-white border-0 px-4 py-1.5 cursor-pointer">
+                            Upgrade Now
+                          </Badge>
+                        </Link>
                       </div>
-                      <h4 className="font-semibold text-slate-900 mb-1">
-                        Documents Locked
-                      </h4>
-                      <p className="text-sm text-slate-500 mb-3">
-                        Upgrade to a paid plan to download unlimited tender
-                        documents.
-                      </p>
-                      <Link href="/pricing">
-                        <Badge className="bg-amber-500 hover:bg-amber-600 text-white border-0 px-4 py-1.5 cursor-pointer">
-                          Upgrade Now
-                        </Badge>
-                      </Link>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
 
-          {isSubscribed && (
-            <DocumentAnalysis
-              tenderTitle={tender.title}
-              tenderDescription={tender.description}
-              documents={documents}
-            />
-          )}
+            {isSubscribed && (
+              <DocumentAnalysis
+                tenderTitle={tender.title}
+                tenderDescription={tender.description}
+                documents={documents}
+              />
+            )}
 
-          {/* Reference Info */}
-          {isSubscribed && (
-            <div className="mt-8 pt-6 border-t text-sm text-muted-foreground">
-              <p>
-                <strong>OCID:</strong> {tender.ocid}
-              </p>
-              {tender.sourceName && (
-              <p>
-                <strong>Source:</strong> {tender.sourceName}
-              </p>
-              )}
-              {tender.sourceUrl && (
-              <p>
-                <strong>Source URL:</strong> {tender.sourceUrl}
-              </p>
-              )}
-              <p>
-                <strong>Internal ID:</strong> {tender.id}
-              </p>
-            </div>
-          )}
+            {/* Reference Info */}
+            {isSubscribed && (
+              <div className="mt-8 pt-6 border-t text-sm text-muted-foreground">
+                <p>
+                  <strong>OCID:</strong> {tender.ocid}
+                </p>
+                {tender.sourceName && (
+                  <p>
+                    <strong>Source:</strong> {tender.sourceName}
+                  </p>
+                )}
+                {tender.sourceUrl && (
+                  <p>
+                    <strong>Source URL:</strong> {tender.sourceUrl}
+                  </p>
+                )}
+                <p>
+                  <strong>Internal ID:</strong> {tender.id}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
       )}
     </div>
   );

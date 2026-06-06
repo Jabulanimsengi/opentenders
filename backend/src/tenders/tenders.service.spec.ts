@@ -6,6 +6,7 @@ describe('TendersService', () => {
   let prisma: {
     tender: {
       findMany: jest.Mock;
+      findFirst: jest.Mock;
       count: jest.Mock;
     };
   };
@@ -14,6 +15,7 @@ describe('TendersService', () => {
     prisma = {
       tender: {
         findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
         count: jest.fn().mockResolvedValue(0),
       },
     };
@@ -116,6 +118,57 @@ describe('TendersService', () => {
           gte: expect.any(Date),
           lte: expect.any(Date),
         },
+      },
+    ]);
+  });
+
+  it('includes public award supplier details for awarded tenders', async () => {
+    prisma.tender.findMany.mockResolvedValue([
+      {
+        id: 'tender-awarded',
+        slug: 'awarded-tender',
+        title: 'Awarded tender',
+        status: 'active',
+        publishedDate: new Date('2026-01-10T00:00:00.000Z'),
+        closingDate: new Date('2026-01-20T00:00:00.000Z'),
+        awards: [
+          {
+            id: 'award-1',
+            supplierName: 'Winning Supplier',
+            amount: 125000,
+            currency: 'ZAR',
+            date: null,
+            tenderId: 'tender-awarded',
+            createdAt: new Date('2026-01-25T00:00:00.000Z'),
+          },
+        ],
+      },
+    ]);
+    prisma.tender.count.mockResolvedValue(1);
+
+    const result = await service.findAll({
+      awarded: true,
+      page: 1,
+      limit: 20,
+    });
+
+    expect(prisma.tender.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          awards: { some: {} },
+        }),
+        include: {
+          awards: { orderBy: { date: 'desc' }, take: 3 },
+        },
+      }),
+    );
+    expect(result.data[0].awards).toEqual([
+      {
+        id: 'award-1',
+        supplierName: 'Winning Supplier',
+        amount: 125000,
+        currency: 'ZAR',
+        date: null,
       },
     ]);
   });
