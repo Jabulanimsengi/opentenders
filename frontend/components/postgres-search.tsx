@@ -8,6 +8,9 @@ import {
   Suspense,
   useMemo,
   useRef,
+  type ChangeEvent,
+  type CompositionEvent,
+  type FormEvent,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,6 +41,7 @@ import { type Tender, type TenderFacets } from "@/lib/api-client";
 import { useSession } from "next-auth/react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001/api";
+const SEARCH_COMMIT_DELAY_MS = 650;
 
 interface TenderCardProps {
   tender: Tender;
@@ -543,10 +547,14 @@ function PostgresSearchContent({
   const [selectedAlertCategory, setSelectedAlertCategory] = useState("");
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [isSavingAlert, setIsSavingAlert] = useState(false);
+  const [isComposingSearch, setIsComposingSearch] = useState(false);
   const requestSeq = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const latestInputValueRef = useRef(inputValue);
 
   // Get current values from URL
   const query = searchParams.get("q") || defaultQuery;
+  const searchParamString = searchParams.toString();
   const page = parseInt(searchParams.get("page") || "1", 10);
   const statusParam = searchParams.get("status") || "";
   const regionParam = searchParams.get("region") || defaultRegion;
@@ -570,25 +578,49 @@ function PostgresSearchContent({
     isLoggedIn && isSubscriber && categoryAlertOptions.length > 0;
 
   useEffect(() => {
-    setInputValue(query);
+    latestInputValueRef.current = inputValue;
+  }, [inputValue]);
+
+  useEffect(() => {
+    const inputHasFocus =
+      typeof document !== "undefined" &&
+      document.activeElement === searchInputRef.current;
+
+    if (!inputHasFocus || latestInputValueRef.current.trim() === query.trim()) {
+      setInputValue(query);
+    }
   }, [query]);
 
-  // Debounced search
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (inputValue !== query) {
-        const params = new URLSearchParams(searchParams.toString());
-        if (inputValue) {
-          params.set("q", inputValue);
-        } else {
-          params.delete("q");
-        }
-        params.set("page", "1");
-        router.push(`?${params.toString()}`);
+  const commitSearchQuery = useCallback(
+    (value: string) => {
+      const nextQuery = value.trim();
+      if (nextQuery === query.trim()) return;
+
+      const params = new URLSearchParams(searchParamString);
+      if (nextQuery) {
+        params.set("q", nextQuery);
+      } else {
+        params.delete("q");
       }
-    }, 300);
+      params.set("page", "1");
+
+      startTransition(() => {
+        router.replace(`?${params.toString()}`, { scroll: false });
+      });
+    },
+    [query, router, searchParamString, startTransition],
+  );
+
+  // Wait for a short typing pause before committing URL/search state.
+  useEffect(() => {
+    if (isComposingSearch || inputValue.trim() === query.trim()) return;
+
+    const timer = window.setTimeout(() => {
+      commitSearchQuery(inputValue);
+    }, SEARCH_COMMIT_DELAY_MS);
+
     return () => clearTimeout(timer);
-  }, [inputValue, query, router, searchParams]);
+  }, [commitSearchQuery, inputValue, isComposingSearch, query]);
 
   // Fetch facets on mount
   useEffect(() => {
@@ -689,12 +721,30 @@ function PostgresSearchContent({
     router.push(`?${params.toString()}`);
   };
 
+  const handleSearchInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setInputValue(event.target.value);
+  };
+
+  const handleSearchCompositionEnd = (
+    event: CompositionEvent<HTMLInputElement>,
+  ) => {
+    setIsComposingSearch(false);
+    setInputValue(event.currentTarget.value);
+  };
+
+  const handleSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    commitSearchQuery(inputValue);
+  };
+
   const handleClearSearch = () => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("q");
     params.set("page", "1");
     setInputValue("");
-    router.push(`?${params.toString()}`);
+    startTransition(() => {
+      router.replace(`?${params.toString()}`, { scroll: false });
+    });
   };
 
   const handleClearAwarded = () => {
@@ -764,13 +814,20 @@ function PostgresSearchContent({
   return (
     <div className="space-y-3 sm:space-y-6">
       {/* Search Box */}
-      <div className="relative">
+      <form className="relative" role="search" onSubmit={handleSearchSubmit}>
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 sm:left-4 sm:h-5 sm:w-5" />
         <Input
-          type="text"
+          ref={searchInputRef}
+          type="search"
           placeholder="Try: cleaning services in Gauteng"
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
+          onChange={handleSearchInputChange}
+          onCompositionStart={() => setIsComposingSearch(true)}
+          onCompositionEnd={handleSearchCompositionEnd}
+          enterKeyHint="search"
+          autoComplete="off"
+          spellCheck={false}
+          aria-busy={isPending || isLoading}
           className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-16 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 sm:h-12 sm:rounded-xl sm:pl-12 sm:pr-20"
         />
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 sm:right-3">
@@ -790,7 +847,7 @@ function PostgresSearchContent({
             </Button>
           )}
         </div>
-      </div>
+      </form>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 sm:gap-3">
