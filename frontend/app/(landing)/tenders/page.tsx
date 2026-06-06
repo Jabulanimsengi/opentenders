@@ -116,7 +116,7 @@ export default async function TendersPage() {
               {stats.closingSoon.toLocaleString()}
             </p>
             <p className="mt-1 text-[10px] font-medium leading-tight text-slate-500 sm:text-xs">
-              Soon
+              Closing Soon
             </p>
           </div>
         </Link>
