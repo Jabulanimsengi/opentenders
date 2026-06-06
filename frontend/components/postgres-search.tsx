@@ -273,16 +273,14 @@ function TenderCard({
                             : `${daysLeft} days left`}
                     </div>
                   ) : null}
-                  {isLoggedIn && (
-                    <div data-bookmark-button>
-                      <BookmarkButton
-                        tenderId={tender.id}
-                        variant="icon"
-                        isSubscriber={isSubscriber}
-                        className="h-8 w-8 rounded-md sm:h-9 sm:w-9"
-                      />
-                    </div>
-                  )}
+                  <div data-bookmark-button>
+                    <BookmarkButton
+                      tenderId={tender.id}
+                      variant="icon"
+                      isSubscriber={isSubscriber}
+                      className="h-8 w-8 rounded-md sm:h-9 sm:w-9"
+                    />
+                  </div>
                 </div>
                 {isLoggedIn ? (
                   <div className="flex items-center gap-2">

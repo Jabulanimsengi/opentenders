@@ -1,4 +1,11 @@
-import { FileText, Heart, Search, Trophy, type LucideIcon } from "lucide-react";
+import {
+  Bookmark,
+  FileText,
+  Heart,
+  Search,
+  Trophy,
+  type LucideIcon,
+} from "lucide-react";
 
 export type NavigationItem = {
   title: string;
@@ -8,6 +15,7 @@ export type NavigationItem = {
 
 export const publicNavigationItems: NavigationItem[] = [
   { title: "Browse Tenders", url: "/tenders", icon: Search },
+  { title: "Saved Tenders", url: "/bookmarks", icon: Bookmark },
   { title: "Features", url: "/#features", icon: Trophy },
   { title: "How It Works", url: "/#how-it-works", icon: FileText },
   { title: "Pricing", url: "/pricing", icon: Heart },

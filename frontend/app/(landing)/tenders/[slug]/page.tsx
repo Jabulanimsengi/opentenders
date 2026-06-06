@@ -312,31 +312,26 @@ export default async function TenderPage(props: {
           <ArrowLeft className="w-4 h-4 mr-1" /> Back to Tenders
         </Link>
         <div className="flex flex-wrap items-center gap-2">
+          <BookmarkButton tenderId={tender.id} isSubscriber={isSubscribed} />
           {isLoggedIn && (
-            <>
-              <BookmarkButton
-                tenderId={tender.id}
-                isSubscriber={isSubscribed}
-              />
-              <DownloadPDFWrapper
-                tender={{
-                  title: tender.title,
-                  description: tender.description || "",
-                  buyerName: tender.buyerName || "",
-                  region: tender.region || "",
-                  category: tender.category || "",
-                  closingDate: tender.closingDate
-                    ? new Date(tender.closingDate).toISOString()
-                    : null,
-                  publishedDate: tender.publishedDate
-                    ? new Date(tender.publishedDate).toISOString()
-                    : null,
-                  status: tender.status || "active",
-                  ocid: tender.ocid,
-                }}
-                isLoggedIn={isLoggedIn}
-              />
-            </>
+            <DownloadPDFWrapper
+              tender={{
+                title: tender.title,
+                description: tender.description || "",
+                buyerName: tender.buyerName || "",
+                region: tender.region || "",
+                category: tender.category || "",
+                closingDate: tender.closingDate
+                  ? new Date(tender.closingDate).toISOString()
+                  : null,
+                publishedDate: tender.publishedDate
+                  ? new Date(tender.publishedDate).toISOString()
+                  : null,
+                status: tender.status || "active",
+                ocid: tender.ocid,
+              }}
+              isLoggedIn={isLoggedIn}
+            />
           )}
         </div>
       </div>
