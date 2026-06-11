@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Clock,
   Database,
+  Globe2,
   Loader2,
   Play,
   RefreshCw,
@@ -73,6 +74,29 @@ type ScrapeError = {
   createdAt: string;
 };
 
+type SourceHttpCheck = {
+  id: string;
+  checkedAt: string;
+  ok: boolean;
+  statusCode?: number | null;
+  responseTimeMs?: number | null;
+  errorCategory?: string | null;
+  errorMessage?: string | null;
+};
+
+type SourceIssue = {
+  id: string;
+  status: string;
+  severity: string;
+  reason: string;
+  failureCount: number;
+  assignedTo?: string | null;
+  resolutionNote?: string | null;
+  firstDetectedAt: string;
+  lastDetectedAt: string;
+  resolvedAt?: string | null;
+};
+
 type SourceHealth = {
   id: string;
   name: string;
@@ -94,6 +118,9 @@ type SourceHealth = {
   tenderCount: number;
   recentRunCount: number;
   recentErrorCount: number;
+  latestHttpCheck?: SourceHttpCheck | null;
+  consecutiveHttpFailures: number;
+  latestOpenIssue?: SourceIssue | null;
   latestRun?: ScrapeRun | null;
   latestSuccessfulRun?: ScrapeRun | null;
   latestError?: ScrapeError | null;
@@ -120,6 +147,10 @@ type SourceHealthResponse = {
     overdueSources: number;
     failingSources: number;
     runningSources: number;
+    non200Sources: number;
+    openSourceIssues: number;
+    checkedSources: number;
+    averageResponseTimeMs?: number | null;
     recentRuns: number;
     recentErrors: number;
   };
@@ -148,6 +179,8 @@ export default function AdminSourcesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [scrapingSourceId, setScrapingSourceId] = useState<string | null>(null);
   const [scrapingAll, setScrapingAll] = useState(false);
+  const [checkingSourceId, setCheckingSourceId] = useState<string | null>(null);
+  const [checkingAll, setCheckingAll] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
@@ -239,6 +272,64 @@ export default function AdminSourcesPage() {
     }
   }
 
+  async function checkSource(sourceId: string) {
+    if (!token) return;
+    setCheckingSourceId(sourceId);
+    try {
+      const response = await fetch(
+        `${API_BASE}/external-sources/${sourceId}/check`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.message || "Source check failed");
+      }
+
+      const data = await response.json();
+      toast(
+        data.ok
+          ? `HTTP check passed in ${data.responseTimeMs}ms`
+          : `HTTP check failed: ${data.errorMessage || data.statusCode}`,
+        data.ok ? "success" : "error",
+      );
+      await loadData();
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : "Failed to check source",
+        "error",
+      );
+    } finally {
+      setCheckingSourceId(null);
+    }
+  }
+
+  async function checkAllActive() {
+    if (!token) return;
+    setCheckingAll(true);
+    try {
+      const response = await fetch(`${API_BASE}/external-sources/check-active`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) throw new Error("Check all failed");
+      const data = await response.json();
+      toast(
+        `Checked ${data.totalSources || 0} active sources; ${data.failed || 0} need attention`,
+        data.failed ? "error" : "success",
+      );
+      await loadData();
+    } catch {
+      toast("Failed to check active source responses", "error");
+    } finally {
+      setCheckingAll(false);
+    }
+  }
+
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/");
@@ -272,6 +363,11 @@ export default function AdminSourcesPage() {
           source.sourceType,
           source.tenderUrl,
           source.latestError?.message,
+          source.latestHttpCheck?.statusCode?.toString(),
+          source.latestHttpCheck?.errorCategory,
+          source.latestHttpCheck?.errorMessage,
+          source.latestOpenIssue?.reason,
+          source.latestOpenIssue?.status,
         ]
           .filter(Boolean)
           .join(" ")
@@ -314,6 +410,18 @@ export default function AdminSourcesPage() {
             )}
             Refresh
           </Button>
+          <Button
+            onClick={checkAllActive}
+            variant="outline"
+            disabled={checkingAll}
+          >
+            {checkingAll ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Globe2 className="mr-2 h-4 w-4" />
+            )}
+            Check Active
+          </Button>
           <Button onClick={scrapeAllActive} disabled={scrapingAll}>
             {scrapingAll ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -325,7 +433,7 @@ export default function AdminSourcesPage() {
         </div>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:mb-6 xl:grid-cols-5">
+      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:mb-6 xl:grid-cols-7">
         <Metric
           title="Active Sources"
           value={summary?.activeSources || 0}
@@ -355,6 +463,22 @@ export default function AdminSourcesPage() {
           value={summary?.failingSources || 0}
           detail={`${summary?.recentErrors || 0} recent errors`}
           icon={<AlertTriangle />}
+        />
+        <Metric
+          title="Non-200 URLs"
+          value={summary?.non200Sources || 0}
+          detail={`${summary?.checkedSources || 0} sources checked`}
+          icon={<Globe2 />}
+        />
+        <Metric
+          title="Open Issues"
+          value={summary?.openSourceIssues || 0}
+          detail={
+            summary?.averageResponseTimeMs
+              ? `Avg ${summary.averageResponseTimeMs}ms response`
+              : "No response samples yet"
+          }
+          icon={<XCircle />}
         />
       </div>
 
@@ -444,10 +568,12 @@ export default function AdminSourcesPage() {
                 <TableRow>
                   <TableHead>Source</TableHead>
                   <TableHead>Health</TableHead>
+                  <TableHead>HTTP</TableHead>
                   <TableHead>Real Data</TableHead>
                   <TableHead>Latest Run</TableHead>
                   <TableHead>Next Check</TableHead>
                   <TableHead>Evidence</TableHead>
+                  <TableHead>Issue</TableHead>
                   <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
@@ -483,6 +609,9 @@ export default function AdminSourcesPage() {
                           {source.latestError.message}
                         </div>
                       )}
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <HttpCheckSummary source={source} />
                     </TableCell>
                     <TableCell className="align-top">
                       <Badge
@@ -548,29 +677,68 @@ export default function AdminSourcesPage() {
                         {source.latestRun?.numberOfDuplicatesFound ?? 0}
                       </div>
                     </TableCell>
+                    <TableCell className="align-top">
+                      {source.latestOpenIssue ? (
+                        <div className="max-w-xs text-sm">
+                          <div className="flex flex-wrap gap-1">
+                            <Badge variant="outline">
+                              {source.latestOpenIssue.status}
+                            </Badge>
+                            <Badge variant="secondary">
+                              {source.latestOpenIssue.severity}
+                            </Badge>
+                          </div>
+                          <div className="mt-2 text-xs text-red-700">
+                            {source.latestOpenIssue.reason}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {source.latestOpenIssue.failureCount} failures
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-slate-500">None</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right align-top">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => scrapeSource(source.id)}
-                        disabled={
-                          scrapingAll || scrapingSourceId === source.id
-                        }
-                      >
-                        {scrapingSourceId === source.id ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                        )}
-                        Scrape
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => checkSource(source.id)}
+                          disabled={
+                            checkingAll || checkingSourceId === source.id
+                          }
+                        >
+                          {checkingSourceId === source.id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Globe2 className="mr-2 h-4 w-4" />
+                          )}
+                          Check
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => scrapeSource(source.id)}
+                          disabled={
+                            scrapingAll || scrapingSourceId === source.id
+                          }
+                        >
+                          {scrapingSourceId === source.id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                          )}
+                          Scrape
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
                 {filteredSources.length === 0 && (
                   <TableRow>
                     <TableCell
-                      colSpan={7}
+                      colSpan={9}
                       className="h-24 text-center text-sm text-slate-500"
                     >
                       No sources match the current filters.
@@ -641,6 +809,19 @@ export default function AdminSourcesPage() {
                     </div>
                   </div>
                   <div className="rounded-md bg-slate-50 p-2">
+                    <div className="text-slate-500">HTTP</div>
+                    <div className="mt-1 font-medium text-slate-900">
+                      {source.latestHttpCheck
+                        ? source.latestHttpCheck.statusCode || "Error"
+                        : "Not checked"}
+                    </div>
+                    <div className="text-slate-500">
+                      {source.latestHttpCheck?.responseTimeMs
+                        ? `${source.latestHttpCheck.responseTimeMs}ms`
+                        : source.latestHttpCheck?.errorCategory || "No sample"}
+                    </div>
+                  </div>
+                  <div className="rounded-md bg-slate-50 p-2">
                     <div className="text-slate-500">Evidence</div>
                     <div className="mt-1 font-medium text-slate-900">
                       Found {source.latestRun?.numberOfTendersFound ?? 0}
@@ -655,20 +836,39 @@ export default function AdminSourcesPage() {
                     {source.latestError.message}
                   </div>
                 )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-3 w-full"
-                  onClick={() => scrapeSource(source.id)}
-                  disabled={scrapingAll || scrapingSourceId === source.id}
-                >
-                  {scrapingSourceId === source.id ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                  )}
-                  Scrape
-                </Button>
+                {source.latestOpenIssue && (
+                  <div className="mt-3 rounded-md border border-amber-100 bg-amber-50 p-2 text-xs text-amber-800">
+                    {source.latestOpenIssue.reason}
+                  </div>
+                )}
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => checkSource(source.id)}
+                    disabled={checkingAll || checkingSourceId === source.id}
+                  >
+                    {checkingSourceId === source.id ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Globe2 className="mr-2 h-4 w-4" />
+                    )}
+                    Check
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => scrapeSource(source.id)}
+                    disabled={scrapingAll || scrapingSourceId === source.id}
+                  >
+                    {scrapingSourceId === source.id ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Scrape
+                  </Button>
+                </div>
               </div>
             ))}
             {filteredSources.length === 0 && (
@@ -707,6 +907,44 @@ function Metric({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function HttpCheckSummary({ source }: { source: SourceHealth }) {
+  const check = source.latestHttpCheck;
+  if (!check) {
+    return <span className="text-sm text-slate-500">Not checked</span>;
+  }
+
+  const statusLabel = check.statusCode ? `HTTP ${check.statusCode}` : "Error";
+  const isOk = check.ok && (!check.statusCode || check.statusCode === 200);
+
+  return (
+    <div className="space-y-1 text-sm">
+      <Badge
+        variant={isOk ? "default" : "outline"}
+        className={isOk ? "bg-emerald-600 text-white" : "border-red-200 text-red-700"}
+      >
+        {statusLabel}
+      </Badge>
+      <div className="text-xs text-slate-500">
+        {check.responseTimeMs !== null && check.responseTimeMs !== undefined
+          ? `${check.responseTimeMs}ms`
+          : "No latency"}
+        {" · "}
+        {formatDistanceToNow(new Date(check.checkedAt))} ago
+      </div>
+      {!check.ok && (
+        <div className="max-w-xs text-xs text-red-700">
+          {check.errorCategory || check.errorMessage || "Response failed"}
+        </div>
+      )}
+      {source.consecutiveHttpFailures > 0 && (
+        <div className="text-xs text-slate-500">
+          {source.consecutiveHttpFailures} consecutive failures
+        </div>
+      )}
+    </div>
   );
 }
 

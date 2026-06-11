@@ -107,6 +107,7 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   ownedOrganizations      Organization[]           @relation("OrganizationOwner")
   organizationMemberships OrganizationMember[]
+  analyticsEvents         AnalyticsEvent[]
 }
 
 model Subscription {
@@ -256,6 +257,8 @@ model TenderSource {
   updatedAt              DateTime  @updatedAt
 
   scrapeRuns ExternalScrapeRun[]
+  httpChecks SourceHttpCheck[]
+  issues     SourceIssue[]
 
   @@index([active])
   @@index([sourceType])
@@ -313,4 +316,73 @@ model ExternalTenderChangeLog {
   @@index([tenderId])
   @@index([sourceId])
   @@index([createdAt])
+}
+
+model AnalyticsEvent {
+  id         String   @id @default(uuid())
+  userId     String?
+  sessionId  String?
+  eventName  String
+  entityType String?
+  entityId   String?
+  path       String?
+  referrer   String?
+  metadata   String?
+  userAgent  String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([eventName])
+  @@index([entityType])
+  @@index([createdAt])
+}
+
+model SourceHttpCheck {
+  id             String   @id @default(uuid())
+  sourceId       String?
+  sourceName     String
+  url            String
+  checkedAt      DateTime @default(now())
+  ok             Boolean
+  statusCode     Int?
+  responseTimeMs Int?
+  errorCategory  String?
+  errorMessage   String?
+
+  source TenderSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([sourceId])
+  @@index([checkedAt])
+  @@index([ok])
+  @@index([statusCode])
+  @@index([errorCategory])
+}
+
+model SourceIssue {
+  id              String    @id @default(uuid())
+  sourceId        String?
+  sourceName      String
+  url             String
+  status          String    @default("open")
+  severity        String    @default("medium")
+  reason          String
+  failureCount    Int       @default(1)
+  assignedTo      String?
+  resolutionNote  String?
+  firstDetectedAt DateTime  @default(now())
+  lastDetectedAt  DateTime  @default(now())
+  resolvedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  source TenderSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([sourceId])
+  @@index([status])
+  @@index([severity])
+  @@index([lastDetectedAt])
 }

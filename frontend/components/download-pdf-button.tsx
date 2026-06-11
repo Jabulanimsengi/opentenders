@@ -1,7 +1,9 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { trackAnalyticsEvent } from '@/lib/analytics';
 import { FileText, Loader2 } from 'lucide-react';
+import { useSession } from 'next-auth/react';
 import { useState } from 'react';
 
 interface TenderDetails {
@@ -32,10 +34,21 @@ interface DownloadPDFButtonProps {
 }
 
 export function DownloadPDFButton({ tender, disabled = false }: DownloadPDFButtonProps) {
+    const { data: session } = useSession();
     const [downloading, setDownloading] = useState(false);
+    const accessToken = (session as { accessToken?: string } | null)?.accessToken;
 
     const generatePDF = async () => {
         setDownloading(true);
+        trackAnalyticsEvent(
+            {
+                eventName: 'document_download',
+                entityType: 'tender',
+                entityId: tender.ocid,
+                metadata: { format: 'pdf', title: tender.title },
+            },
+            accessToken,
+        );
 
         try {
             // Generate HTML content for PDF

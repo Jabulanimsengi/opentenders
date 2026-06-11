@@ -34,6 +34,11 @@ export class ExternalSourcesController {
     return this.externalSourcesService.getHealth();
   }
 
+  @Get('issues')
+  getIssues() {
+    return this.externalSourcesService.getIssues();
+  }
+
   @Post()
   create(@Body() dto: CreateTenderSourceDto) {
     return this.externalSourcesService.create(dto);
@@ -54,8 +59,32 @@ export class ExternalSourcesController {
     return this.externalSourcesService.scrapeAllActive();
   }
 
+  @Post('check-active')
+  checkActiveSourceAvailability() {
+    return this.externalSourcesService.checkActiveSourceAvailability();
+  }
+
+  @Patch('issues/:id')
+  updateIssue(
+    @Param('id') id: string,
+    @Body()
+    dto: {
+      status?: string;
+      severity?: string;
+      assignedTo?: string | null;
+      resolutionNote?: string | null;
+    },
+  ) {
+    return this.externalSourcesService.updateIssue(id, dto);
+  }
+
   @Post(':id/scrape')
   scrapeSource(@Param('id') id: string) {
     return this.externalSourcesService.scrapeSource(id);
+  }
+
+  @Post(':id/check')
+  checkSourceAvailability(@Param('id') id: string) {
+    return this.externalSourcesService.checkSourceAvailability(id);
   }
 }

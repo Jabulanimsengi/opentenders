@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { TenderFilter } from "@/components/tender-filter";
 import { type Tender, type TenderFacets } from "@/lib/api-client";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 import { useSession } from "next-auth/react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001/api";
@@ -551,6 +552,7 @@ function PostgresSearchContent({
   const requestSeq = useRef(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const latestInputValueRef = useRef(inputValue);
+  const lastTrackedSearchKey = useRef<string | null>(null);
 
   // Get current values from URL
   const query = searchParams.get("q") || defaultQuery;
@@ -656,6 +658,7 @@ function PostgresSearchContent({
         if (categoryFilter.length)
           params.set("category", categoryFilter.join(","));
         if (awardedOnly) params.set("awarded", "true");
+        const analyticsKey = params.toString();
 
         const res = await fetch(`${API_BASE}/tenders?${params.toString()}`, {
           cache: "no-store",
@@ -676,6 +679,31 @@ function PostgresSearchContent({
         setTotal(data.meta?.total || 0);
         setSearchEngine(data.meta?.searchEngine || "prisma");
         setProcessingTimeMs(data.meta?.processingTimeMs ?? null);
+
+        if (
+          page === 1 &&
+          query &&
+          analyticsKey !== lastTrackedSearchKey.current
+        ) {
+          lastTrackedSearchKey.current = analyticsKey;
+          trackAnalyticsEvent(
+            {
+              eventName: "search_submitted",
+              entityType: "tender",
+              metadata: {
+                q: query,
+                resultCount: data.meta?.total || 0,
+                status: statusFilter,
+                region: regionFilter,
+                category: categoryFilter,
+                awardedOnly,
+                searchEngine: data.meta?.searchEngine,
+                processingTimeMs: data.meta?.processingTimeMs,
+              },
+            },
+            accessToken,
+          );
+        }
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") return;
 
@@ -794,6 +822,17 @@ function PostgresSearchContent({
       }
 
       setAlertMessage("Alert created. Initial matches will be emailed.");
+      trackAnalyticsEvent(
+        {
+          eventName: "saved_search_created",
+          entityType: "saved_search",
+          metadata: {
+            category: selectedAlertCategory,
+            alertFrequency: "daily",
+          },
+        },
+        accessToken,
+      );
       setSelectedAlertCategory("");
     } catch (err) {
       setAlertMessage(

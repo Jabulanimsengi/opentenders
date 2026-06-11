@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Bookmark, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 import {
   addToGuestWatchlist,
   isInGuestWatchlist,
@@ -95,6 +96,12 @@ export function BookmarkButton({
       } else {
         addToGuestWatchlist(tenderId);
         setIsBookmarked(true);
+        trackAnalyticsEvent({
+          eventName: "bookmark_created",
+          entityType: "tender",
+          entityId: tenderId,
+          metadata: { mode: "guest_watchlist" },
+        });
         toast("Tender saved to Saved Tenders", "success");
       }
 
@@ -129,6 +136,14 @@ export function BookmarkButton({
 
         if (res.ok) {
           setIsBookmarked(true);
+          trackAnalyticsEvent(
+            {
+              eventName: "bookmark_created",
+              entityType: "tender",
+              entityId: tenderId,
+            },
+            accessToken,
+          );
           toast("Tender saved to Saved Tenders", "success");
         } else {
           toast("Failed to save tender", "error");

@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Settings, Menu, X, User, Shield } from "lucide-react";
+import { BarChart3, Database, Settings, Menu, X, User, Shield } from "lucide-react";
 import { useState } from "react";
 import { AuthDialog } from "./auth-dialog";
 import { SignOutDialog } from "./signout-dialog";
@@ -82,15 +82,31 @@ export function TopNavbar({ user }: TopNavbarProps) {
                   Settings
                 </Link>
 
-                {/* Admin Link - only for admins */}
+                {/* Admin Links - only for admins */}
                 {user.role === "admin" && (
-                  <Link
-                    href="/admin/users"
-                    className="hidden md:flex relative items-center gap-2 px-4 h-16 text-sm font-medium transition-colors text-orange-600 hover:text-orange-700 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-orange-500 after:transition-transform after:duration-200 after:scale-x-0 hover:after:scale-x-100"
-                  >
-                    <Shield className="w-4 h-4" />
-                    Admin
-                  </Link>
+                  <>
+                    <Link
+                      href="/admin/analytics"
+                      className="hidden md:flex relative items-center gap-2 px-3 h-16 text-sm font-medium transition-colors text-orange-600 hover:text-orange-700 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-orange-500 after:transition-transform after:duration-200 after:scale-x-0 hover:after:scale-x-100"
+                    >
+                      <BarChart3 className="w-4 h-4" />
+                      Analytics
+                    </Link>
+                    <Link
+                      href="/admin/sources"
+                      className="hidden md:flex relative items-center gap-2 px-3 h-16 text-sm font-medium transition-colors text-orange-600 hover:text-orange-700 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-orange-500 after:transition-transform after:duration-200 after:scale-x-0 hover:after:scale-x-100"
+                    >
+                      <Database className="w-4 h-4" />
+                      Sources
+                    </Link>
+                    <Link
+                      href="/admin/users"
+                      className="hidden md:flex relative items-center gap-2 px-3 h-16 text-sm font-medium transition-colors text-orange-600 hover:text-orange-700 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-orange-500 after:transition-transform after:duration-200 after:scale-x-0 hover:after:scale-x-100"
+                    >
+                      <Shield className="w-4 h-4" />
+                      Users
+                    </Link>
+                  </>
                 )}
 
                 <div className="hidden md:flex relative items-center h-16">
@@ -175,6 +191,34 @@ export function TopNavbar({ user }: TopNavbarProps) {
                     <Settings className="w-5 h-5" />
                     Settings
                   </Link>
+                  {user.role === "admin" && (
+                    <>
+                      <Link
+                        href="/admin/analytics"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-orange-700 hover:bg-orange-50"
+                      >
+                        <BarChart3 className="w-5 h-5" />
+                        Analytics
+                      </Link>
+                      <Link
+                        href="/admin/sources"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-orange-700 hover:bg-orange-50"
+                      >
+                        <Database className="w-5 h-5" />
+                        Sources
+                      </Link>
+                      <Link
+                        href="/admin/users"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-orange-700 hover:bg-orange-50"
+                      >
+                        <Shield className="w-5 h-5" />
+                        Users
+                      </Link>
+                    </>
+                  )}
                   <div className="px-4 py-2">
                     <SignOutDialog />
                   </div>

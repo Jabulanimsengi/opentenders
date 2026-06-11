@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateTenderSourceDto,
@@ -19,6 +20,8 @@ type PrismaWithExternalSources = PrismaService & {
   tenderSource: any;
   externalScrapeRun: any;
   externalScrapeError: any;
+  sourceHttpCheck: any;
+  sourceIssue: any;
   tender: any;
 };
 
@@ -53,18 +56,23 @@ type SourceHealthItem = {
   tenderCount: number;
   recentRunCount: number;
   recentErrorCount: number;
+  latestHttpCheck: any | null;
+  consecutiveHttpFailures: number;
+  latestOpenIssue: any | null;
   latestRun: any | null;
   latestSuccessfulRun: any | null;
   latestError: any | null;
 };
 
 const SOUTH_AFRICAN_MUNICIPALITY_TARGET_COUNT = 257;
+const SOURCE_HTTP_TIMEOUT_MS = 15000;
 
 @Injectable()
 export class ExternalSourcesService {
   private readonly logger = new Logger(ExternalSourcesService.name);
   private readonly runningSourceIds = new Set<string>();
   private schedulerRunning = false;
+  private httpCheckRunning = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -78,7 +86,8 @@ export class ExternalSourcesService {
 
   async getHealth() {
     const now = new Date();
-    const [sources, runs, errors, tenderCounts] = await Promise.all([
+    const [sources, runs, errors, tenderCounts, httpChecks, openIssues] =
+      await Promise.all([
       this.db.tenderSource.findMany({
         orderBy: [{ active: 'desc' }, { lastScrapedAt: 'asc' }],
       }),
@@ -95,10 +104,20 @@ export class ExternalSourcesService {
         where: { sourceName: { not: null } },
         _count: { _all: true },
       }),
+      this.db.sourceHttpCheck.findMany({
+        orderBy: { checkedAt: 'desc' },
+        take: 1000,
+      }),
+      this.db.sourceIssue.findMany({
+        where: { status: { in: ['open', 'investigating'] } },
+        orderBy: { lastDetectedAt: 'desc' },
+      }),
     ]);
 
     const runsBySource = new Map<string, any[]>();
     const errorsBySource = new Map<string, any[]>();
+    const httpChecksBySource = new Map<string, any[]>();
+    const openIssueBySource = new Map<string, any>();
     const tenderCountBySourceName = new Map<string, number>();
 
     for (const run of runs) {
@@ -115,6 +134,19 @@ export class ExternalSourcesService {
       errorsBySource.set(error.sourceId, sourceErrors);
     }
 
+    for (const check of httpChecks) {
+      if (!check.sourceId) continue;
+      const sourceChecks = httpChecksBySource.get(check.sourceId) || [];
+      sourceChecks.push(check);
+      httpChecksBySource.set(check.sourceId, sourceChecks);
+    }
+
+    for (const issue of openIssues) {
+      if (issue.sourceId && !openIssueBySource.has(issue.sourceId)) {
+        openIssueBySource.set(issue.sourceId, issue);
+      }
+    }
+
     for (const item of tenderCounts) {
       if (item.sourceName) {
         tenderCountBySourceName.set(item.sourceName, item._count._all);
@@ -125,7 +157,12 @@ export class ExternalSourcesService {
       (source: TenderSourceRecord): SourceHealthItem => {
       const sourceRuns = runsBySource.get(source.id) || [];
       const sourceErrors = errorsBySource.get(source.id) || [];
+      const sourceHttpChecks = httpChecksBySource.get(source.id) || [];
       const latestRun = sourceRuns[0] || null;
+      const latestHttpCheck = sourceHttpChecks[0] || null;
+      const consecutiveHttpFailures =
+        this.getConsecutiveHttpFailures(sourceHttpChecks);
+      const latestOpenIssue = openIssueBySource.get(source.id) || null;
       const latestSuccessfulRun =
         sourceRuns.find((run) =>
           ['success', 'partial_success'].includes(run.status),
@@ -186,6 +223,7 @@ export class ExternalSourcesService {
         status: this.getSourceHealthStatus({
           active: source.active,
           latestRun,
+          latestHttpCheck,
           realDataConfirmed,
           isDue,
           isOverdue,
@@ -195,6 +233,9 @@ export class ExternalSourcesService {
         tenderCount: sourceTenderCount,
         recentRunCount: sourceRuns.length,
         recentErrorCount: sourceErrors.length,
+        latestHttpCheck,
+        consecutiveHttpFailures,
+        latestOpenIssue,
         latestRun,
         latestSuccessfulRun,
         latestError,
@@ -234,6 +275,17 @@ export class ExternalSourcesService {
       runningSources: sourceHealth.filter(
         (source) => source.status === 'running',
       ).length,
+      non200Sources: sourceHealth.filter(
+        (source) =>
+          source.latestHttpCheck &&
+          (!source.latestHttpCheck.ok ||
+            (source.latestHttpCheck.statusCode &&
+              source.latestHttpCheck.statusCode !== 200)),
+      ).length,
+      openSourceIssues: openIssues.length,
+      checkedSources: sourceHealth.filter((source) => source.latestHttpCheck)
+        .length,
+      averageResponseTimeMs: this.getAverageResponseTime(sourceHealth),
       recentRuns: runs.length,
       recentErrors: errors.length,
     };
@@ -389,6 +441,80 @@ export class ExternalSourcesService {
     return { success: failed === 0, runs, failed, totalSources: sources.length };
   }
 
+  async checkSourceAvailability(id: string) {
+    const source = await this.findOne(id);
+    return this.recordSourceHttpCheck(source);
+  }
+
+  async checkActiveSourceAvailability() {
+    const sources = (await this.db.tenderSource.findMany({
+      where: { active: true },
+      orderBy: [{ lastScrapedAt: 'asc' }, { createdAt: 'asc' }],
+    })) as TenderSourceRecord[];
+    const batchSize = Number(process.env.SOURCE_HTTP_CHECK_BATCH_SIZE || 500);
+    const concurrency = Math.max(
+      1,
+      Number(process.env.SOURCE_HTTP_CHECK_CONCURRENCY || 10),
+    );
+    const selectedSources = sources.slice(0, batchSize);
+    const results = await this.runWithConcurrency(
+      selectedSources,
+      concurrency,
+      (source) => this.recordSourceHttpCheck(source),
+    );
+    const checks = results
+      .filter(
+        (result): result is PromiseFulfilledResult<any> =>
+          result.status === 'fulfilled',
+      )
+      .map((result) => result.value);
+    const failed = checks.filter((check) => !check.ok).length;
+
+    return {
+      success: failed === 0,
+      checks,
+      failed,
+      totalSources: selectedSources.length,
+    };
+  }
+
+  getIssues() {
+    return this.db.sourceIssue.findMany({
+      orderBy: [{ status: 'asc' }, { lastDetectedAt: 'desc' }],
+      take: 250,
+    });
+  }
+
+  async updateIssue(
+    id: string,
+    dto: {
+      status?: string;
+      severity?: string;
+      assignedTo?: string | null;
+      resolutionNote?: string | null;
+    },
+  ) {
+    const issue = await this.db.sourceIssue.findUnique({ where: { id } });
+    if (!issue) throw new NotFoundException('Source issue not found');
+
+    const status = dto.status || issue.status;
+    return this.db.sourceIssue.update({
+      where: { id },
+      data: {
+        status,
+        severity: dto.severity,
+        assignedTo: dto.assignedTo,
+        resolutionNote: dto.resolutionNote,
+        resolvedAt:
+          status === 'fixed' || status === 'ignored'
+            ? new Date()
+            : status === 'open' || status === 'investigating'
+              ? null
+              : issue.resolvedAt,
+      },
+    });
+  }
+
   getRuns() {
     return this.db.externalScrapeRun.findMany({
       orderBy: { startedAt: 'desc' },
@@ -446,6 +572,26 @@ export class ExternalSourcesService {
     }
   }
 
+  @Cron('*/30 * * * *')
+  async checkActiveSourceResponses() {
+    if (this.httpCheckRunning) {
+      this.logger.warn(
+        'External source HTTP checker is already running; skipping',
+      );
+      return;
+    }
+
+    this.httpCheckRunning = true;
+    try {
+      const result = await this.checkActiveSourceAvailability();
+      this.logger.log(
+        `External source HTTP checker processed ${result.totalSources} sources (${result.failed} non-OK)`,
+      );
+    } finally {
+      this.httpCheckRunning = false;
+    }
+  }
+
   private async runWithConcurrency<T, R>(
     items: T[],
     concurrency: number,
@@ -497,17 +643,20 @@ export class ExternalSourcesService {
   private getSourceHealthStatus({
     active,
     latestRun,
+    latestHttpCheck,
     realDataConfirmed,
     isDue,
     isOverdue,
   }: {
     active: boolean;
     latestRun: any | null;
+    latestHttpCheck: any | null;
     realDataConfirmed: boolean;
     isDue: boolean;
     isOverdue: boolean;
   }): SourceHealthStatus {
     if (!active) return 'paused';
+    if (latestHttpCheck && !latestHttpCheck.ok) return 'failing';
     if (!latestRun) return 'untested';
     if (latestRun.status === 'running') return 'running';
     if (latestRun.status === 'failed') return 'failing';
@@ -518,5 +667,212 @@ export class ExternalSourcesService {
 
   private get db() {
     return this.prisma as PrismaWithExternalSources;
+  }
+
+  private async recordSourceHttpCheck(source: TenderSourceRecord) {
+    const startedAt = Date.now();
+    const result = await this.performHttpCheck(source.tenderUrl);
+    const responseTimeMs = Date.now() - startedAt;
+    const check = await this.db.sourceHttpCheck.create({
+      data: {
+        sourceId: source.id,
+        sourceName: source.name,
+        url: source.tenderUrl,
+        ok: result.ok,
+        statusCode: result.statusCode,
+        responseTimeMs,
+        errorCategory: result.errorCategory,
+        errorMessage: result.errorMessage,
+      },
+    });
+
+    if (check.ok) {
+      await this.resolveOpenSourceIssue(source.id);
+    } else {
+      await this.openOrUpdateSourceIssue(source, check);
+    }
+
+    return check;
+  }
+
+  private async performHttpCheck(url: string) {
+    try {
+      const response = await axios.head(url, {
+        timeout: SOURCE_HTTP_TIMEOUT_MS,
+        maxRedirects: 5,
+        validateStatus: () => true,
+      });
+
+      if (response.status === 405) {
+        return this.performGetHttpCheck(url);
+      }
+
+      return {
+        ok: response.status >= 200 && response.status < 300,
+        statusCode: response.status,
+        errorCategory: this.getHttpErrorCategory(response.status),
+        errorMessage:
+          response.status >= 200 && response.status < 300
+            ? undefined
+            : `HTTP ${response.status}`,
+      };
+    } catch (error) {
+      return this.getHttpFailureResult(error);
+    }
+  }
+
+  private async performGetHttpCheck(url: string) {
+    try {
+      const response = await axios.get(url, {
+        timeout: SOURCE_HTTP_TIMEOUT_MS,
+        maxRedirects: 5,
+        responseType: 'text',
+        headers: { Range: 'bytes=0-1024' },
+        validateStatus: () => true,
+      });
+
+      return {
+        ok: response.status >= 200 && response.status < 300,
+        statusCode: response.status,
+        errorCategory: this.getHttpErrorCategory(response.status),
+        errorMessage:
+          response.status >= 200 && response.status < 300
+            ? undefined
+            : `HTTP ${response.status}`,
+      };
+    } catch (error) {
+      return this.getHttpFailureResult(error);
+    }
+  }
+
+  private getHttpFailureResult(error: unknown) {
+    if (axios.isAxiosError(error)) {
+      const code = error.code || '';
+      return {
+        ok: false,
+        statusCode: error.response?.status,
+        errorCategory: this.getNetworkErrorCategory(code, error.message),
+        errorMessage: error.message,
+      };
+    }
+
+    return {
+      ok: false,
+      statusCode: undefined,
+      errorCategory: 'unknown',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  private getHttpErrorCategory(statusCode?: number) {
+    if (!statusCode || (statusCode >= 200 && statusCode < 300)) return undefined;
+    if (statusCode === 401 || statusCode === 403) return 'blocked';
+    if (statusCode === 404 || statusCode === 410) return 'not_found';
+    if (statusCode === 429) return 'rate_limited';
+    if (statusCode >= 500) return 'server_error';
+    return 'http_status';
+  }
+
+  private getNetworkErrorCategory(code: string, message: string) {
+    const normalized = `${code} ${message}`.toLowerCase();
+    if (normalized.includes('timeout') || code === 'ECONNABORTED') {
+      return 'timeout';
+    }
+    if (normalized.includes('enotfound') || normalized.includes('dns')) {
+      return 'dns';
+    }
+    if (normalized.includes('certificate') || normalized.includes('ssl')) {
+      return 'ssl';
+    }
+    if (normalized.includes('econnrefused')) return 'connection_refused';
+    return 'network_error';
+  }
+
+  private async openOrUpdateSourceIssue(source: TenderSourceRecord, check: any) {
+    const reason =
+      check.errorMessage ||
+      (check.statusCode ? `HTTP ${check.statusCode}` : 'Source check failed');
+    const severity = this.getIssueSeverity(check);
+    const openIssue = await this.db.sourceIssue.findFirst({
+      where: {
+        sourceId: source.id,
+        status: { in: ['open', 'investigating'] },
+      },
+      orderBy: { lastDetectedAt: 'desc' },
+    });
+
+    if (openIssue) {
+      return this.db.sourceIssue.update({
+        where: { id: openIssue.id },
+        data: {
+          reason,
+          severity,
+          failureCount: { increment: 1 },
+          lastDetectedAt: new Date(),
+        },
+      });
+    }
+
+    return this.db.sourceIssue.create({
+      data: {
+        sourceId: source.id,
+        sourceName: source.name,
+        url: source.tenderUrl,
+        reason,
+        severity,
+        failureCount: 1,
+      },
+    });
+  }
+
+  private async resolveOpenSourceIssue(sourceId: string) {
+    const openIssue = await this.db.sourceIssue.findFirst({
+      where: {
+        sourceId,
+        status: { in: ['open', 'investigating'] },
+      },
+      orderBy: { lastDetectedAt: 'desc' },
+    });
+
+    if (!openIssue) return null;
+
+    return this.db.sourceIssue.update({
+      where: { id: openIssue.id },
+      data: {
+        status: 'fixed',
+        resolvedAt: new Date(),
+        resolutionNote: 'Recovered automatically after a successful HTTP check.',
+      },
+    });
+  }
+
+  private getIssueSeverity(check: any) {
+    if (check.statusCode === 404 || check.statusCode === 410) return 'high';
+    if (check.statusCode === 401 || check.statusCode === 403) return 'medium';
+    if (check.statusCode >= 500) return 'high';
+    if (check.errorCategory === 'dns' || check.errorCategory === 'ssl') {
+      return 'high';
+    }
+    return 'medium';
+  }
+
+  private getConsecutiveHttpFailures(checks: any[]) {
+    let count = 0;
+    for (const check of checks) {
+      if (check.ok) break;
+      count += 1;
+    }
+    return count;
+  }
+
+  private getAverageResponseTime(sources: SourceHealthItem[]) {
+    const responseTimes = sources
+      .map((source) => source.latestHttpCheck?.responseTimeMs)
+      .filter((value): value is number => Number.isFinite(value));
+    if (!responseTimes.length) return null;
+    return Math.round(
+      responseTimes.reduce((total, value) => total + value, 0) /
+        responseTimes.length,
+    );
   }
 }

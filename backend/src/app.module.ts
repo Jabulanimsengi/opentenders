@@ -17,6 +17,7 @@ import { ExternalSourcesModule } from './external-sources';
 import { TypesenseModule } from './typesense';
 import { TeamModule } from './team/team.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { AnalyticsModule } from './analytics';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     ExternalSourcesModule,
     TeamModule,
     SubscriptionsModule,
+    AnalyticsModule,
   ],
   providers: [
     {

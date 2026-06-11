@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 type TenderDocument = {
   title?: string;
@@ -67,6 +68,7 @@ export function DocumentAnalysis({
   const [loading, setLoading] = useState<"url" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
+  const accessToken = (session as { accessToken?: string } | null)?.accessToken;
 
   const normalizedAnalysis = useMemo(() => {
     if (!result) return null;
@@ -122,6 +124,18 @@ export function DocumentAnalysis({
       setLoading("url");
       setError(null);
       setResult(null);
+      trackAnalyticsEvent(
+        {
+          eventName: "document_analysis_started",
+          entityType: "document",
+          metadata: {
+            tenderTitle,
+            documentTitle:
+              document.title || document.documentType || "Tender document",
+          },
+        },
+        accessToken,
+      );
 
       const candidates = [
         document,
@@ -142,6 +156,19 @@ export function DocumentAnalysis({
             );
             if (matchedIndex >= 0) setSelectedIndex(String(matchedIndex));
             setResult(analysis);
+            trackAnalyticsEvent(
+              {
+                eventName: "document_analysis_completed",
+                entityType: "document",
+                metadata: {
+                  tenderTitle,
+                  fileName: analysis.fileName,
+                  analysisSource: analysis.analysisSource,
+                  model: analysis.model,
+                },
+              },
+              accessToken,
+            );
             return;
           } catch (err) {
             failures.push(
@@ -161,7 +188,7 @@ export function DocumentAnalysis({
         setLoading(null);
       }
     },
-    [documentOptions, requestDocumentAnalysis],
+    [accessToken, documentOptions, requestDocumentAnalysis, tenderTitle],
   );
 
   useEffect(() => {
